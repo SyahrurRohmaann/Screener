@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Candle = [number, string, string, string, string, string, number];
-type Market = { o: number[]; h: number[]; l: number[]; c: number[]; v: number[] };
+type Market = { o: number[]; h: number[]; l: number[]; c: number[]; v: number[]; t: number[] };
 
 const COINS = (process.env.SCREENER_COINS ?? "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT")
   .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
@@ -65,7 +65,7 @@ async function candles(symbol: string, interval: string, limit: number): Promise
   return {
     o: closed.map((x) => Number(x[1])), h: closed.map((x) => Number(x[2])),
     l: closed.map((x) => Number(x[3])), c: closed.map((x) => Number(x[4])),
-    v: closed.map((x) => Number(x[5])),
+    v: closed.map((x) => Number(x[5])), t: closed.map((x) => Number(x[6])),
   };
 }
 
@@ -112,6 +112,19 @@ function pattern(data: Market, i: number, bullish: boolean) {
                  : (engulf || hammer || invertedHammer || eveningStar || darkCloud);
 }
 
+function atr(data: Market, period = 14) {
+  const tr: number[] = [];
+  for (let i = 1; i < data.c.length; i++) {
+    tr.push(Math.max(
+      data.h[i] - data.l[i],
+      Math.abs(data.h[i] - data.c[i - 1]),
+      Math.abs(data.l[i] - data.c[i - 1]),
+    ));
+  }
+  if (tr.length < period) return NaN;
+  return tr.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
 async function analyze(coin: string) {
   const [m30, m1h] = await Promise.all([candles(coin, "30m", 200), candles(coin, "1h", 100)]);
   if (!m30 || !m1h) return { coin, error: "data unavailable" };
@@ -137,7 +150,58 @@ async function analyze(coin: string) {
     if (bearCandle) reasons.push("candle bearish"); if (rsiDown70) reasons.push("RSI tembus↓70");
     if (volumeUp) reasons.push("MAVOL5>14"); if (belowEma) reasons.push("harga<EMA50");
   }
-  return { coin, price: m30.c[i], sig, score, reasons, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", timeframe: "30m", ...await microstructure(coin) };
+
+  const close = m30.c[i];
+  const a = atr(m30, 14);
+  const atrPct = Number.isFinite(a) ? (a / close) * 100 : null;
+  // Mode: searah tren 1h atau counter-trend (pantulan RSI)
+  const mode = sig
+    ? ((sig === "LONG" && bullish1h) || (sig === "SHORT" && !bullish1h) ? "TREND" : "COUNTER")
+    : null;
+
+  // Entry zone: dari close ke arah retrace 0.25 ATR; stop mengikuti struktur candle
+  // sinyal + buffer 0.5 ATR, dibatasi maksimal 8% (SL strategi lama).
+  let plan: null | {
+    entry_low: number; entry_high: number; invalidation: number;
+    risk_pct: number; tp1: number; tp2: number; rr1: number; rr2: number;
+  } = null;
+  if (sig && Number.isFinite(a)) {
+    const buf = 0.5 * a;
+    if (sig === "LONG") {
+      const entryLow = close - 0.25 * a, entryHigh = close;
+      const raw = Math.min(m30.l[i], m30.l[i - 1]) - buf;
+      const capped = Math.max(raw, close * 0.92);
+      const risk = entryHigh - capped;
+      plan = {
+        entry_low: entryLow, entry_high: entryHigh, invalidation: capped,
+        risk_pct: (risk / entryHigh) * 100,
+        tp1: entryHigh + risk, tp2: entryHigh + 2 * risk, rr1: 1, rr2: 2,
+      };
+    } else {
+      const entryHigh = close + 0.25 * a, entryLow = close;
+      const raw = Math.max(m30.h[i], m30.h[i - 1]) + buf;
+      const capped = Math.min(raw, close * 1.08);
+      const risk = capped - entryLow;
+      plan = {
+        entry_low: entryLow, entry_high: entryHigh, invalidation: capped,
+        risk_pct: (risk / entryLow) * 100,
+        tp1: entryLow - risk, tp2: entryLow - 2 * risk, rr1: 1, rr2: 2,
+      };
+    }
+  }
+
+  const closedAt = m30.t[i];
+  const ageMin = Math.max(0, Math.round((Date.now() - closedAt) / 60000));
+  // Candle 30m: sinyal dianggap segar < 30 menit, layak dipantau < 60 menit.
+  const status = !sig ? "NONE" : ageMin <= 5 ? "NEW" : ageMin <= 30 ? "VALID" : ageMin <= 60 ? "WEAKENING" : "EXPIRED";
+
+  return {
+    coin, price: close, sig, score, reasons, mode, status,
+    signal_closed_at: closedAt, age_min: ageMin,
+    atr: Number.isFinite(a) ? a : null, atr_pct: atrPct,
+    plan, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", timeframe: "30m",
+    ...await microstructure(coin),
+  };
 }
 
 export async function GET() {

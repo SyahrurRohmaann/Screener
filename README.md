@@ -5,7 +5,9 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
 ## Features
 
 - Live 30m + 1h market scan from Binance public Futures API
-- LONG / SHORT / WAIT status
+- LONG / SHORT / WAIT status with signal state (NEW / VALID / WEAKENING / EXPIRED / INVALIDATED)
+- Entry zone, invalidation level, and 1R/2R reference targets derived from ATR + candle structure
+- Signal age and TREND / COUNTER-TREND labelling
 - Transparent confluence score (candle, RSI, MAVOL, EMA)
 - Funding, open interest change, long/short ratio, and taker ratio
 - Responsive dark trading terminal UI
