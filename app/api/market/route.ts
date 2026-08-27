@@ -3,13 +3,14 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Candle = [number, string, string, string, string, string];
+type Candle = [number, string, string, string, string, string, number];
 type Market = { o: number[]; h: number[]; l: number[]; c: number[]; v: number[] };
 
 const COINS = (process.env.SCREENER_COINS ?? "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT")
   .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
 const BINANCE = process.env.BINANCE_FAPI_URL ?? "https://fapi.binance.com";
-const MIN_SCORE = Number(process.env.SCREENER_MIN_SCORE ?? 3);
+// Parity dengan kandidat MultiTFTrend terakhir: entry_threshold=2.
+const MIN_SCORE = Number(process.env.SCREENER_MIN_SCORE ?? 2);
 
 async function getJson<T>(path: string): Promise<T | null> {
   try {
@@ -58,10 +59,13 @@ function rsi(close: number[], period = 14) {
 async function candles(symbol: string, interval: string, limit: number): Promise<Market | null> {
   const data = await getJson<Candle[]>(`/fapi/v1/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`);
   if (!data?.length) return null;
+  // Freqtrade process_only_new_candles bekerja pada candle yang sudah tutup.
+  // Binance sering mengembalikan candle berjalan sebagai elemen terakhir.
+  const closed = data.filter((x) => Number(x[6]) <= Date.now());
   return {
-    o: data.map((x) => Number(x[1])), h: data.map((x) => Number(x[2])),
-    l: data.map((x) => Number(x[3])), c: data.map((x) => Number(x[4])),
-    v: data.map((x) => Number(x[5])),
+    o: closed.map((x) => Number(x[1])), h: closed.map((x) => Number(x[2])),
+    l: closed.map((x) => Number(x[3])), c: closed.map((x) => Number(x[4])),
+    v: closed.map((x) => Number(x[5])),
   };
 }
 
@@ -84,18 +88,28 @@ async function microstructure(symbol: string) {
 }
 
 function pattern(data: Market, i: number, bullish: boolean) {
-  if (i < 1) return false;
+  if (i < 2) return false;
   const body = Math.abs(data.c[i] - data.o[i]);
   const range = data.h[i] - data.l[i] + 1e-9;
   const upper = data.h[i] - Math.max(data.o[i], data.c[i]);
   const lower = Math.min(data.o[i], data.c[i]) - data.l[i];
+  const prevBody = Math.abs(data.c[i - 1] - data.o[i - 1]);
+  const prevRange = data.h[i - 1] - data.l[i - 1] + 1e-9;
+  const twoBackBear = data.c[i - 2] < data.o[i - 2];
+  const twoBackBull = data.c[i - 2] > data.o[i - 2];
   const previousBear = data.c[i - 1] < data.o[i - 1];
   const previousBull = data.c[i - 1] > data.o[i - 1];
   const engulf = bullish
     ? data.c[i] > data.o[i] && previousBear && data.c[i] >= data.o[i - 1] && data.o[i] <= data.c[i - 1]
     : data.c[i] < data.o[i] && previousBull && data.c[i] <= data.o[i - 1] && data.o[i] >= data.c[i - 1];
-  const wick = bullish ? lower > 2 * body && body / range < 0.35 : upper > 2 * body && body / range < 0.35;
-  return engulf || wick;
+  const hammer = lower > 2 * body && body / range < 0.35;
+  const invertedHammer = upper > 2 * body && body / range < 0.35;
+  const morningStar = twoBackBear && prevBody / prevRange < 0.35 && data.c[i] > data.o[i] && data.c[i] > (data.o[i - 2] + data.c[i - 2]) / 2;
+  const eveningStar = twoBackBull && prevBody / prevRange < 0.35 && data.c[i] < data.o[i] && data.c[i] < (data.o[i - 2] + data.c[i - 2]) / 2;
+  const piercing = previousBear && data.c[i] > data.o[i] && data.o[i] <= data.c[i - 1] && data.c[i] > (data.o[i - 1] + data.c[i - 1]) / 2;
+  const darkCloud = previousBull && data.c[i] < data.o[i] && data.o[i] >= data.c[i - 1] && data.c[i] < (data.o[i - 1] + data.c[i - 1]) / 2;
+  return bullish ? (engulf || hammer || invertedHammer || morningStar || piercing)
+                 : (engulf || hammer || invertedHammer || eveningStar || darkCloud);
 }
 
 async function analyze(coin: string) {
