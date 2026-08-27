@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { atr, candles, ema, getJson, rsi, sma, type Market } from "../../lib/indicators";
+import { recordSignals, type SignalRecord } from "../../lib/store";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -82,7 +83,7 @@ async function analyze(coin: string) {
   const close = m30.c[i];
   const a = atr(m30, 14);
   const atrPct = Number.isFinite(a) ? (a / close) * 100 : null;
-  const mode = sig
+  const mode: "TREND" | "COUNTER" | null = sig
     ? ((sig === "LONG" && bullish1h) || (sig === "SHORT" && !bullish1h) ? "TREND" : "COUNTER")
     : null;
 
@@ -130,5 +131,24 @@ async function analyze(coin: string) {
 
 export async function GET() {
   const rows = await Promise.all(COINS.map(analyze));
-  return NextResponse.json({ source: "binance-futures", ts: Date.now(), min_score: MIN_SCORE, rows });
+
+  // Log every signal once per closed candle so performance can be audited later.
+  const now = Date.now();
+  const candidates: SignalRecord[] = rows.flatMap((r) => {
+    if (!("sig" in r) || !r.sig || !r.plan) return [];
+    return [{
+      key: `${r.coin}-${r.signal_closed_at}`,
+      coin: r.coin, sig: r.sig, score: r.score, mode: r.mode ?? null,
+      signal_closed_at: r.signal_closed_at, recorded_at: now,
+      close: r.price,
+      entry: r.sig === "LONG" ? r.plan.entry_high : r.plan.entry_low,
+      stop: r.plan.invalidation, tp1: r.plan.tp1, tp2: r.plan.tp2,
+      risk_pct: r.plan.risk_pct,
+      rsi: Number.isFinite(r.rsi) ? r.rsi : null,
+      trend_1h: r.trend_1h, atr_pct: r.atr_pct, reasons: r.reasons,
+    }];
+  });
+  const logged = await recordSignals(candidates);
+
+  return NextResponse.json({ source: "binance-futures", ts: now, min_score: MIN_SCORE, logged: logged.added, rows });
 }

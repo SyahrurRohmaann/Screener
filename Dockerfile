@@ -5,6 +5,9 @@ RUN npm ci
 COPY . .
 RUN npm run build
 ENV NODE_ENV=production
+ENV SCREENER_DATA_DIR=/data
+RUN mkdir -p /data
+VOLUME ["/data"]
 EXPOSE 3000
 CMD ["npm", "run", "start", "--", "-p", "3000"]
 

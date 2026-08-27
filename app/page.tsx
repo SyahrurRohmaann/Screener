@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Chart from "./components/Chart";
+import History from "./components/History";
 import RiskCalculator from "./components/RiskCalculator";
 import type { Row } from "./lib/format";
 import { age, liveStatus, money, num, pct } from "./lib/format";
@@ -166,10 +167,12 @@ export default function Home() {
 
     <RiskCalculator rows={rows} />
 
+    <History />
+
     {chartRow && <Chart row={chartRow} onClose={() => setChartCoin(null)} />}
 
     <footer>
-      <span>SCREENER v1.2</span>
+      <span>SCREENER v1.3</span>
       <span>EDGE: THIN / MANUAL VALIDATION REQUIRED</span>
       <span>BINANCE USDT-M · 30M / 1H</span>
     </footer>
