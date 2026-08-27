@@ -1,46 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-type Plan = {
-  entry_low: number; entry_high: number; invalidation: number;
-  risk_pct: number; tp1: number; tp2: number; rr1: number; rr2: number;
-};
-type Row = {
-  coin: string; price: number; sig?: "LONG" | "SHORT" | null; score: number; rsi: number;
-  trend_1h: string; timeframe?: string; mode?: "TREND" | "COUNTER" | null; status?: string;
-  age_min?: number; atr_pct?: number | null; plan?: Plan | null; reasons?: string[];
-  funding?: number; oi_chg?: number; ls_ratio?: number; taker?: number;
-};
+import Chart from "./components/Chart";
+import RiskCalculator from "./components/RiskCalculator";
+import type { Row } from "./lib/format";
+import { age, liveStatus, money, num, pct } from "./lib/format";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 const demo: Row[] = COINS.slice(0, 3).map((coin) => ({
   coin, price: 0, score: 0, rsi: 50, trend_1h: "BULL", status: "NONE",
 }));
 
-const money = (n?: number | null) =>
-  n == null || !Number.isFinite(n) || n === 0
-    ? "—"
-    : `$${n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 6 : 2 })}`;
-const pct = (n?: number | null) =>
-  n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(3)}%`;
-const num = (n?: number | null, d = 2) =>
-  n == null || !Number.isFinite(n) ? "—" : n.toFixed(d);
-const age = (m?: number) =>
-  m == null ? "—" : m < 60 ? `${m}m lalu` : `${Math.floor(m / 60)}j ${m % 60}m lalu`;
-
-// Harga realtime bisa membatalkan rencana sebelum refresh indikator 60s berikutnya.
-function liveStatus(r: Row) {
-  if (!r.sig || !r.plan) return r.status ?? "NONE";
-  const hit = r.sig === "LONG" ? r.price <= r.plan.invalidation : r.price >= r.plan.invalidation;
-  return hit ? "INVALIDATED" : r.status ?? "NONE";
-}
+const SIDES = ["ALL", "LONG", "SHORT"] as const;
+const MODES = ["ALL", "TREND", "COUNTER"] as const;
 
 export default function Home() {
   const [rows, setRows] = useState<Row[]>(demo);
   const [updated, setUpdated] = useState<Date | null>(null);
-  const [filter, setFilter] = useState("ALL");
+  const [side, setSide] = useState<(typeof SIDES)[number]>("ALL");
+  const [mode, setMode] = useState<(typeof MODES)[number]>("ALL");
+  const [minScore, setMinScore] = useState(0);
+  const [hideStale, setHideStale] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [chartCoin, setChartCoin] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,11 +57,19 @@ export default function Home() {
     return () => { clearInterval(indicators); clearInterval(context); ws.close(); };
   }, [load]);
 
-  const shown = useMemo(
-    () => rows.filter((r) => filter === "ALL" || r.sig === filter),
-    [rows, filter],
-  );
+  const shown = useMemo(() => rows.filter((r) => {
+    if (side !== "ALL" && r.sig !== side) return false;
+    if (mode !== "ALL" && r.mode !== mode) return false;
+    if (minScore > 0 && (r.score ?? 0) < minScore) return false;
+    if (hideStale) {
+      const state = liveStatus(r);
+      if (state === "EXPIRED" || state === "INVALIDATED") return false;
+    }
+    return true;
+  }), [rows, side, mode, minScore, hideStale]);
+
   const setups = rows.filter((r) => r.sig).length;
+  const chartRow = chartCoin ? rows.find((r) => r.coin === chartCoin) ?? null : null;
 
   return <main>
     <header className="topbar">
@@ -101,13 +91,26 @@ export default function Home() {
 
     <nav className="filters">
       <span>MARKET SCAN</span>
-      {["ALL", "LONG", "SHORT"].map((f) => (
-        <button className={filter === f ? "active" : ""} onClick={() => setFilter(f)} key={f}>{f}</button>
+      {SIDES.map((f) => (
+        <button className={side === f ? "active" : ""} onClick={() => setSide(f)} key={f}>{f}</button>
       ))}
+      <span className="sep" />
+      {MODES.map((m) => (
+        <button className={mode === m ? "active" : ""} onClick={() => setMode(m)} key={m}>
+          {m === "ALL" ? "ANY MODE" : m}
+        </button>
+      ))}
+      <span className="sep" />
+      {[0, 3, 4, 5].map((s) => (
+        <button className={minScore === s ? "active" : ""} onClick={() => setMinScore(s)} key={s}>
+          {s === 0 ? "ANY SCORE" : `≥${s}`}
+        </button>
+      ))}
+      <button className={hideStale ? "active" : ""} onClick={() => setHideStale((v) => !v)}>FRESH ONLY</button>
       <span className="updated">Last sync: {updated ? updated.toLocaleTimeString("id-ID") : "—"}</span>
     </nav>
 
-    <section className="grid">{shown.map((r) => {
+    <section className="grid">{shown.length ? shown.map((r) => {
       const state = liveStatus(r);
       const dead = state === "EXPIRED" || state === "INVALIDATED";
       return <article className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}`} key={r.coin}>
@@ -156,13 +159,17 @@ export default function Home() {
 
         <div className="cardFoot">
           <span>Signal is informational. Validate structure before entry.</span>
-          <span>→</span>
+          <button className="chartBtn" onClick={() => setChartCoin(r.coin)}>CHART ↗</button>
         </div>
       </article>;
-    })}</section>
+    }) : <p className="emptyState">Tidak ada market yang lolos filter ini.</p>}</section>
+
+    <RiskCalculator rows={rows} />
+
+    {chartRow && <Chart row={chartRow} onClose={() => setChartCoin(null)} />}
 
     <footer>
-      <span>SCREENER v1.1</span>
+      <span>SCREENER v1.2</span>
       <span>EDGE: THIN / MANUAL VALIDATION REQUIRED</span>
       <span>BINANCE USDT-M · 30M / 1H</span>
     </footer>

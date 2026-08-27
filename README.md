@@ -9,6 +9,9 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
 - Entry zone, invalidation level, and 1R/2R reference targets derived from ATR + candle structure
 - Signal age and TREND / COUNTER-TREND labelling
 - Transparent confluence score (candle, RSI, MAVOL, EMA)
+- Candlestick chart (30m) with EMA50, volume + MAVOL5/14, RSI14 panel, and entry/stop/TP levels drawn on price
+- Filters for side, trend mode, minimum score, and freshness
+- Risk calculator: position size from account risk, never from a leverage target
 - Funding, open interest change, long/short ratio, and taker ratio
 - Responsive dark trading terminal UI
 - Automatic refresh every 60 seconds and manual refresh button
@@ -38,9 +41,13 @@ Optional environment variables:
 
 ```bash
 SCREENER_COINS=BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT
-SCREENER_MIN_SCORE=2
+SCREENER_MIN_SCORE=4
 BINANCE_FAPI_URL=https://fapi.binance.com
 ```
+
+`SCREENER_MIN_SCORE` defaults to `4`. A threshold of `2` matches the old backtest
+candidate but fires on nearly every market while the trend is up, which removes the
+screening value.
 
 ## Docker
 
@@ -58,8 +65,14 @@ The backend is implemented as a Next.js dynamic route:
 ```text
 app/api/market/route.ts
   -> Binance Futures public REST API
-  -> EMA / RSI / SMA(MAVOL) / candle calculations
+  -> EMA / RSI / SMA(MAVOL) / candle calculations on closed 30m candles
   -> JSON response
+
+app/api/candles/route.ts
+  -> closed 30m candles + EMA50 / RSI14 / MAVOL overlays for the chart
+
+app/api/context/route.ts
+  -> funding, open interest, long/short and taker ratios
 
 app/page.tsx
   -> polls /api/market every 60 seconds; mark price uses Binance WebSocket

@@ -1,73 +1,14 @@
 import { NextResponse } from "next/server";
+import { atr, candles, ema, getJson, rsi, sma, type Market } from "../../lib/indicators";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Candle = [number, string, string, string, string, string, number];
-type Market = { o: number[]; h: number[]; l: number[]; c: number[]; v: number[]; t: number[] };
-
 const COINS = (process.env.SCREENER_COINS ?? "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT")
   .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
-const BINANCE = process.env.BINANCE_FAPI_URL ?? "https://fapi.binance.com";
-// Parity dengan kandidat MultiTFTrend terakhir: entry_threshold=2.
-const MIN_SCORE = Number(process.env.SCREENER_MIN_SCORE ?? 2);
-
-async function getJson<T>(path: string): Promise<T | null> {
-  try {
-    const response = await fetch(`${BINANCE}${path}`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-      headers: { accept: "application/json" },
-    });
-    return response.ok ? await response.json() as T : null;
-  } catch { return null; }
-}
-
-function ema(values: number[], period: number) {
-  const out = Array<number>(values.length).fill(Number.NaN);
-  if (values.length < period) return out;
-  const k = 2 / (period + 1);
-  out[period - 1] = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < values.length; i++) out[i] = values[i] * k + out[i - 1] * (1 - k);
-  return out;
-}
-
-function sma(values: number[], period: number) {
-  const out = Array<number>(values.length).fill(Number.NaN);
-  for (let i = period - 1; i < values.length; i++) {
-    out[i] = values.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
-  }
-  return out;
-}
-
-function rsi(close: number[], period = 14) {
-  const out = Array<number>(close.length).fill(Number.NaN);
-  const changes = close.slice(1).map((x, i) => x - close[i]);
-  if (changes.length < period) return out;
-  let gain = changes.slice(0, period).reduce((a, x) => a + Math.max(x, 0), 0) / period;
-  let loss = changes.slice(0, period).reduce((a, x) => a + Math.max(-x, 0), 0) / period;
-  out[period] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
-  for (let i = period + 1; i < close.length; i++) {
-    const change = changes[i - 1];
-    gain = (gain * (period - 1) + Math.max(change, 0)) / period;
-    loss = (loss * (period - 1) + Math.max(-change, 0)) / period;
-    out[i] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
-  }
-  return out;
-}
-
-async function candles(symbol: string, interval: string, limit: number): Promise<Market | null> {
-  const data = await getJson<Candle[]>(`/fapi/v1/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`);
-  if (!data?.length) return null;
-  // Freqtrade process_only_new_candles bekerja pada candle yang sudah tutup.
-  // Binance sering mengembalikan candle berjalan sebagai elemen terakhir.
-  const closed = data.filter((x) => Number(x[6]) <= Date.now());
-  return {
-    o: closed.map((x) => Number(x[1])), h: closed.map((x) => Number(x[2])),
-    l: closed.map((x) => Number(x[3])), c: closed.map((x) => Number(x[4])),
-    v: closed.map((x) => Number(x[5])), t: closed.map((x) => Number(x[6])),
-  };
-}
+// Threshold 2 (parity MultiTFTrend) menyalakan hampir semua coin saat market trending,
+// sehingga nilai penyaringnya hilang. Default dinaikkan ke 4 = butuh konfluensi nyata.
+const MIN_SCORE = Number(process.env.SCREENER_MIN_SCORE ?? 4);
 
 async function microstructure(symbol: string) {
   const [premium, oi, ls, taker] = await Promise.all([
@@ -112,19 +53,6 @@ function pattern(data: Market, i: number, bullish: boolean) {
                  : (engulf || hammer || invertedHammer || eveningStar || darkCloud);
 }
 
-function atr(data: Market, period = 14) {
-  const tr: number[] = [];
-  for (let i = 1; i < data.c.length; i++) {
-    tr.push(Math.max(
-      data.h[i] - data.l[i],
-      Math.abs(data.h[i] - data.c[i - 1]),
-      Math.abs(data.l[i] - data.c[i - 1]),
-    ));
-  }
-  if (tr.length < period) return NaN;
-  return tr.slice(-period).reduce((a, b) => a + b, 0) / period;
-}
-
 async function analyze(coin: string) {
   const [m30, m1h] = await Promise.all([candles(coin, "30m", 200), candles(coin, "1h", 100)]);
   if (!m30 || !m1h) return { coin, error: "data unavailable" };
@@ -154,12 +82,11 @@ async function analyze(coin: string) {
   const close = m30.c[i];
   const a = atr(m30, 14);
   const atrPct = Number.isFinite(a) ? (a / close) * 100 : null;
-  // Mode: searah tren 1h atau counter-trend (pantulan RSI)
   const mode = sig
     ? ((sig === "LONG" && bullish1h) || (sig === "SHORT" && !bullish1h) ? "TREND" : "COUNTER")
     : null;
 
-  // Entry zone: dari close ke arah retrace 0.25 ATR; stop mengikuti struktur candle
+  // Entry zone: close ke arah retrace 0.25 ATR; stop mengikuti struktur candle
   // sinyal + buffer 0.5 ATR, dibatasi maksimal 8% (SL strategi lama).
   let plan: null | {
     entry_low: number; entry_high: number; invalidation: number;
@@ -169,8 +96,7 @@ async function analyze(coin: string) {
     const buf = 0.5 * a;
     if (sig === "LONG") {
       const entryLow = close - 0.25 * a, entryHigh = close;
-      const raw = Math.min(m30.l[i], m30.l[i - 1]) - buf;
-      const capped = Math.max(raw, close * 0.92);
+      const capped = Math.max(Math.min(m30.l[i], m30.l[i - 1]) - buf, close * 0.92);
       const risk = entryHigh - capped;
       plan = {
         entry_low: entryLow, entry_high: entryHigh, invalidation: capped,
@@ -179,8 +105,7 @@ async function analyze(coin: string) {
       };
     } else {
       const entryHigh = close + 0.25 * a, entryLow = close;
-      const raw = Math.max(m30.h[i], m30.h[i - 1]) + buf;
-      const capped = Math.min(raw, close * 1.08);
+      const capped = Math.min(Math.max(m30.h[i], m30.h[i - 1]) + buf, close * 1.08);
       const risk = capped - entryLow;
       plan = {
         entry_low: entryLow, entry_high: entryHigh, invalidation: capped,
@@ -192,7 +117,6 @@ async function analyze(coin: string) {
 
   const closedAt = m30.t[i];
   const ageMin = Math.max(0, Math.round((Date.now() - closedAt) / 60000));
-  // Candle 30m: sinyal dianggap segar < 30 menit, layak dipantau < 60 menit.
   const status = !sig ? "NONE" : ageMin <= 5 ? "NEW" : ageMin <= 30 ? "VALID" : ageMin <= 60 ? "WEAKENING" : "EXPIRED";
 
   return {
@@ -206,5 +130,5 @@ async function analyze(coin: string) {
 
 export async function GET() {
   const rows = await Promise.all(COINS.map(analyze));
-  return NextResponse.json({ source: "binance-futures", ts: Date.now(), rows });
+  return NextResponse.json({ source: "binance-futures", ts: Date.now(), min_score: MIN_SCORE, rows });
 }
