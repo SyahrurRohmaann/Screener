@@ -113,16 +113,16 @@ function pattern(data: Market, i: number, bullish: boolean) {
 }
 
 async function analyze(coin: string) {
-  const [m15, m1h] = await Promise.all([candles(coin, "15m", 200), candles(coin, "1h", 100)]);
-  if (!m15 || !m1h) return { coin, error: "data unavailable" };
-  const i = m15.c.length - 1;
-  const e15 = ema(m15.c, 50), e1h = ema(m1h.c, 50), r = rsi(m15.c), mv5 = sma(m15.v, 5), mv14 = sma(m15.v, 14);
+  const [m30, m1h] = await Promise.all([candles(coin, "30m", 200), candles(coin, "1h", 100)]);
+  if (!m30 || !m1h) return { coin, error: "data unavailable" };
+  const i = m30.c.length - 1;
+  const e30 = ema(m30.c, 50), e1h = ema(m1h.c, 50), r = rsi(m30.c), mv5 = sma(m30.v, 5), mv14 = sma(m30.v, 14);
   const bullish1h = m1h.c.at(-1)! > e1h.at(-1)!;
   const rsiUp30 = r[i] > 30 && r[i - 1] <= 30;
   const rsiDown70 = r[i] < 70 && r[i - 1] >= 70;
   const volumeUp = mv5[i] > mv14[i];
-  const bullCandle = pattern(m15, i, true), bearCandle = pattern(m15, i, false);
-  const aboveEma = m15.c[i] > e15[i], belowEma = m15.c[i] < e15[i];
+  const bullCandle = pattern(m30, i, true), bearCandle = pattern(m30, i, false);
+  const aboveEma = m30.c[i] > e30[i], belowEma = m30.c[i] < e30[i];
   const longScore = Number(bullCandle) * 2 + Number(rsiUp30) * 2 + Number(volumeUp) + Number(aboveEma);
   const shortScore = Number(bearCandle) * 2 + Number(rsiDown70) * 2 + Number(volumeUp) + Number(belowEma);
   let sig: "LONG" | "SHORT" | null = null;
@@ -137,7 +137,7 @@ async function analyze(coin: string) {
     if (bearCandle) reasons.push("candle bearish"); if (rsiDown70) reasons.push("RSI tembus↓70");
     if (volumeUp) reasons.push("MAVOL5>14"); if (belowEma) reasons.push("harga<EMA50");
   }
-  return { coin, price: m15.c[i], sig, score, reasons, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", ...await microstructure(coin) };
+  return { coin, price: m30.c[i], sig, score, reasons, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", timeframe: "30m", ...await microstructure(coin) };
 }
 
 export async function GET() {

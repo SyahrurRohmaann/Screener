@@ -4,7 +4,7 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
 
 ## Features
 
-- Live 15m + 1h market scan from Binance public Futures API
+- Live 30m + 1h market scan from Binance public Futures API
 - LONG / SHORT / WAIT status
 - Transparent confluence score (candle, RSI, MAVOL, EMA)
 - Funding, open interest change, long/short ratio, and taker ratio
@@ -36,7 +36,7 @@ Optional environment variables:
 
 ```bash
 SCREENER_COINS=BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT
-SCREENER_MIN_SCORE=3
+SCREENER_MIN_SCORE=2
 BINANCE_FAPI_URL=https://fapi.binance.com
 ```
 
@@ -60,7 +60,7 @@ app/api/market/route.ts
   -> JSON response
 
 app/page.tsx
-  -> polls /api/market every 60 seconds
+  -> polls /api/market every 60 seconds; mark price uses Binance WebSocket
   -> renders the dashboard
 ```
 
