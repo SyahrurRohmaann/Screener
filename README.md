@@ -66,9 +66,9 @@ RANKING_SNAPSHOT_TOKEN=...   # optional bearer plus mandatory same-origin POST
 Ranking snapshots live at `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl`. The
 frozen formation schedule is Monday 08:00 UTC (30-minute window). Keep `/data`
 mounted and back up the whole file; never edit or backfill JSONL lines. Snapshot
-POSTs require a same-origin `Origin`; when `RANKING_SNAPSHOT_TOKEN` is set they
-also require `Authorization: Bearer ...`. Do not expose this site publicly
-without authentication and TLS.
+POSTs fail closed unless `RANKING_SNAPSHOT_TOKEN` is configured, and require both
+a same-origin `Origin` plus `Authorization: Bearer <token>`. Do not expose this
+site publicly without authentication and TLS.
 
 `SCREENER_MIN_SCORE` defaults to `4`. A threshold of `2` matches the old backtest
 candidate but fires on nearly every market while the trend is up, which removes the

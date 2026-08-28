@@ -3,6 +3,7 @@ import { FIXED_UNIVERSE, type RankingMarket } from "./ranking";
 
 const H4=14_400_000, WEEK=604_800_000;
 export const FORMATION_WINDOW_MS=30*60_000;
+export const latestClosed4h = (now=Date.now()) => Math.floor(now/H4)*H4-1;
 
 export function schedule(now=Date.now()) {
   const d=new Date(now),day=(d.getUTCDay()+6)%7;
@@ -47,6 +48,9 @@ export async function fetchRankingMarkets(effective:number,fetcher:typeof fetch=
   if(markets.length!==16)errors.push(`Only ${markets.length}/16 markets available`);
   if(ends.some(x=>x!==effective))errors.push("Stale or misaligned effective close");
   if(markets.some(x=>x.candles.length<1000))errors.push("Fewer than 1000 closed 4h bars");
+  const reference=markets[0]?.candles.map(x=>x.closeTime)??[];
+  if(reference.some((x,i)=>i>0&&x-reference[i-1]!==H4))errors.push("Reference market has missing/non-4h candles");
+  if(markets.some(m=>m.candles.some((x,i)=>x.closeTime!==reference[i])))errors.push("Full 1000-bar timestamp grids are not aligned");
   const s=schedule(effective+1);
   return{complete:errors.length===0,markets,errors,dataAsOf:effective,effectiveRebalanceAt:s.scheduledAt,nextRebalanceAt:s.nextRebalanceAt};
 }

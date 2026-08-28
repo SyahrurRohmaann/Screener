@@ -7,7 +7,9 @@ export default function SnapshotAction({ complete }: { complete: boolean }) {
   async function save() {
     setState("saving"); setMessage("");
     try {
-      const response = await fetch("/api/ranking/snapshot", { method: "POST" });
+      const token=window.prompt("Masukkan operator snapshot token");
+      if(!token)throw new Error("Token operator wajib diisi.");
+      const response = await fetch("/api/ranking/snapshot", { method: "POST",headers:{Authorization:`Bearer ${token}`} });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
       setState("done"); setMessage(data.created ? "Snapshot minggu ini dibekukan." : "Snapshot minggu ini sudah ada.");
