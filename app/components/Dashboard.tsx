@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Chart from "./Chart";
 import History from "./History";
@@ -12,6 +12,11 @@ import { age, levelPct, liveStatus, money, num, pct, planEntry } from "../lib/fo
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
 const FEE_ROUNDTRIP = 0.1;
+// Indicators are recomputed from closed 30m candles. Polling faster does not create
+// signals sooner than the candle closes; it only shortens how long a fresh signal
+// stays unnoticed — at 30s the worst-case detection lag is 30s instead of 60s.
+const SIGNAL_REFRESH_MS = 30_000;
+const CONTEXT_REFRESH_MS = 30_000;
 const demo: Row[] = COINS.slice(0, 3).map((coin) => ({
   coin, price: 0, score: 0, rsi: 50, trend_1h: "BULL", status: "NONE",
 }));
@@ -32,26 +37,35 @@ export default function Dashboard() {
   const [feed, setFeed] = useState<"WS" | "POLL" | "OFF">("OFF");
   const [tick, setTick] = useState<Date | null>(null);
 
+  // /api/market fans out to ~60 Binance calls. At a 30s cadence a slow response
+  // could still be in flight when the next tick fires, so requests never overlap.
+  const inFlight = useRef(false);
+
   const load = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     try {
       const response = await fetch("/api/market", { cache: "no-store" });
+      if (!response.ok) return;
       const data = await response.json();
       setRows(data.rows ?? demo);
       setUpdated(new Date());
-    } finally { setLoading(false); }
+    } catch { /* keep the previous rows rather than blanking the screen */ }
+    finally { inFlight.current = false; setLoading(false); }
   }, []);
 
   useEffect(() => {
     load();
-    const indicators = setInterval(load, 60000);
+    const indicators = setInterval(load, SIGNAL_REFRESH_MS);
     const context = setInterval(async () => {
       try {
         const response = await fetch("/api/context", { cache: "no-store" });
+        if (!response.ok) return;
         const data = await response.json();
         setRows((cur) => cur.map((r) => ({ ...r, ...(data[r.coin] ?? {}) })));
       } catch {}
-    }, 20000);
+    }, CONTEXT_REFRESH_MS);
 
     // Mark price: prefer the websocket, but never depend on it. Some networks and
     // browsers complete the upgrade to fstream and then deliver zero frames, which

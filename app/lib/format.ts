@@ -46,7 +46,7 @@ export function levelPct(row: Row, level?: number | null): number | null {
   return Math.abs(level - entry) / entry * 100;
 }
 
-/** Realtime mark price can kill a plan before the next 60s indicator refresh. */
+/** Realtime mark price can kill a plan before the next 30s indicator refresh. */
 export function liveStatus(r: Row) {
   if (!r.sig || !r.plan) return r.status ?? "NONE";
   const hit = r.sig === "LONG" ? r.price <= r.plan.invalidation : r.price >= r.plan.invalidation;

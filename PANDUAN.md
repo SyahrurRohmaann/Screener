@@ -194,7 +194,7 @@ Itu saja. Selebihnya keputusan lo.
 
 ### Yang dia lakukan
 
-- Ambil data candle dari Binance Futures tiap 60 detik
+- Ambil data candle dari Binance Futures tiap 30 detik
 - Hitung indikator (EMA, RSI, volume) di candle 30 menit yang **sudah tutup**
 - Kasih skor konfluensi 0–6
 - Kalau skor cukup, hitung ancar-ancar entry, stop, dan target
@@ -479,7 +479,7 @@ Dari atas ke bawah:
 Angka `00` itu normal dan sehat — artinya nggak ada setup yang lolos filter.
 Kalau tiap saat ada 8–9 setup, berarti threshold-nya kelonggaran.
 
-**Tombol ↻ REFRESH** memaksa hitung ulang sekarang tanpa nunggu 60 detik.
+**Tombol ↻ REFRESH** memaksa hitung ulang sekarang tanpa nunggu 30 detik.
 
 ---
 
@@ -490,8 +490,15 @@ Nggak semua angka di layar update bareng. Ada tiga lapis, sengaja dibedain:
 | Yang update | Seberapa cepat | Kenapa segitu |
 |---|---|---|
 | **Harga (mark price)** | ±1 detik (WebSocket) atau 3 detik (polling) | WebSocket dipakai kalau tersambung; kalau nggak, otomatis fallback ke polling `/api/price`. |
-| **Funding, OI, ratio** | tiap 20 detik | Data ini sendiri cuma berubah tiap 5–15 menit di Binance. Lebih cepat = boros request, nggak ada gunanya. |
-| **Sinyal & skor** | tiap 60 detik | Indikator dihitung dari candle 30m yang **sudah tutup**. Sebelum candle tutup, angkanya nggak berubah. |
+| **Funding, OI, ratio** | tiap 30 detik | Data ini sendiri cuma berubah tiap 5–15 menit di Binance. Lebih cepat = boros request, nggak ada gunanya. |
+| **Sinyal & skor** | tiap 30 detik | Indikator dihitung dari candle 30m yang **sudah tutup**. Sebelum candle tutup, angkanya nggak berubah — jadi 30 detik hanya memperpendek jeda *penemuan*, bukan mempercepat lahirnya sinyal. |
+
+**Kenapa 30 detik tidak membuat sinyal datang lebih awal.** Sinyal lahir dari candle
+30m yang sudah tutup, jadi kelahirannya terjadi tepat di menit :00 dan :30 — di luar
+kendali refresh. Yang dipersingkat cuma jeda antara candle tutup dan lo melihatnya:
+dulu paling lama 60 detik, sekarang paling lama 30 detik. Rata-ratanya 15 detik.
+Menurunkan lagi ke 10 detik tidak menambah kecepatan yang berarti tapi melipatgandakan
+request ke Binance (~60 panggilan tiap kali refresh) dan berisiko kena rate limit.
 
 ### Indikator sumber harga
 
@@ -521,7 +528,7 @@ Kalau kita hitung candle berjalan, sinyal bakal muncul-hilang-muncul terus.
 
 **Satu pengecualian:** status `INVALIDATED` dihitung dari harga realtime.
 Kalau harga nembus stop di detik ini, kartunya langsung ganti status tanpa
-nunggu refresh 60 detik. Ini disengaja — informasi "rencana sudah batal"
+nunggu refresh 30 detik. Ini disengaja — informasi "rencana sudah batal"
 terlalu penting untuk ditunda.
 
 ---
@@ -530,7 +537,7 @@ terlalu penting untuk ditunda.
 
 ### Bahan mentah
 
-Tiap 60 detik, per coin, sistem ambil:
+Tiap 30 detik, per coin, sistem ambil:
 
 - **200 candle 30 menit** → buat hitung sinyal
 - **100 candle 1 jam** → buat lihat tren besar
@@ -879,7 +886,7 @@ umur             = sekarang − signal_closed_at
 
 ### INVALIDATED itu spesial
 
-Semua status lain dihitung dari umur, jadi cuma berubah saat refresh 60 detik.
+Semua status lain dihitung dari umur, jadi cuma berubah saat refresh 30 detik.
 `INVALIDATED` dihitung dari **mark price realtime**:
 
 ```text
@@ -1502,7 +1509,7 @@ Jadi tiap contoh di bawah sebenarnya perlu tambahan `-b /tmp/cookie`. Header
 
 ### GET /api/market
 
-Sinyal lengkap semua coin. Ini yang dipanggil dashboard tiap 60 detik.
+Sinyal lengkap semua coin. Ini yang dipanggil dashboard tiap 30 detik.
 
 ```bash
 curl -s http://127.0.0.1:8643/api/market
@@ -1544,7 +1551,7 @@ curl -s http://127.0.0.1:8643/api/market
 
 ### GET /api/context
 
-Cuma data microstructure. Ringan, dipanggil tiap 20 detik.
+Cuma data microstructure. Ringan, dipanggil tiap 30 detik.
 
 ```bash
 curl -s http://127.0.0.1:8643/api/context
