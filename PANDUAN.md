@@ -233,6 +233,33 @@ screener_dashboard   Up   0.0.0.0:8643->3000/tcp
 
 ### TLS di depan container
 
+Kondisi terpasang saat ini (VPS `16.79.198.38`): nginx 1.28 di port 80/443,
+sertifikat **self-signed** untuk IP tersebut, `SCREENER_COOKIE_SECURE: "1"` aktif,
+dan container hanya listen di `127.0.0.1:8643` sehingga tidak bisa dijangkau
+langsung dari internet. Karena sertifikatnya self-signed, browser menampilkan
+peringatan sekali yang harus lo lewati — koneksinya tetap terenkripsi, jadi
+password tidak dikirim polos. Ganti ke sertifikat Let's Encrypt begitu ada domain.
+
+Config yang dipakai: `deploy/nginx/screener-selfsigned.conf`. Untuk domain asli,
+pakai `deploy/nginx/screener.conf`.
+
+Bikin sertifikat self-signed (10 tahun, dengan SAN IP supaya browser modern mau):
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+  -keyout /etc/nginx/ssl/screener-selfsigned.key \
+  -out /etc/nginx/ssl/screener-selfsigned.crt \
+  -subj "/CN=16.79.198.38" -addext "subjectAltName=IP:16.79.198.38"
+sudo chmod 600 /etc/nginx/ssl/screener-selfsigned.key
+```
+
+Catatan: HSTS **tidak** dikirim oleh nginx pada mode self-signed. Kalau HTTPS
+dipaksa-pin sementara sertifikatnya tidak dipercaya, browser akan menolak situs
+sepenuhnya dan lo kehilangan opsi klik-lewat.
+
+### TLS dengan domain (Let's Encrypt)
+
 Sertifikat tidak dipasang di dalam Next.js; taruh reverse proxy di depannya. Contoh
 Caddy (`/etc/caddy/Caddyfile`) — Caddy mengurus sertifikat Let's Encrypt sendiri:
 
