@@ -127,9 +127,8 @@ polos di jaringan. Di VPS, TLS **sudah aktif**: nginx memegang 443, port 80
 dialihkan otomatis ke HTTPS, dan `SCREENER_COOKIE_SECURE=1` sudah menyala
 sehingga cookie sesi ditandai `Secure`. Detail pemasangan ada di bagian 2.
 
-Sertifikatnya masih self-signed, jadi browser memberi peringatan sekali. Itu
-bukan kerusakan: enkripsinya jalan, yang belum ada adalah pihak ketiga yang
-menjamin identitas server. Peringatan itu hilang kalau nanti pakai domain.
+Sertifikatnya asli dari Let's Encrypt untuk `scansignal.my.id`, jadi tidak ada
+peringatan browser dan perpanjangannya otomatis tiap 90 hari.
 
 Kalau lo memasang ini di tempat lain, urutannya penting: **HTTPS dulu, flag
 kemudian**. Flag itu sengaja tidak diikat ke `NODE_ENV` — kalau cookie ditandai
@@ -180,7 +179,6 @@ urutannya, lo terkunci di luar VPS sendiri.
 
 ### Yang masih jadi batasan
 
-- Sertifikat self-signed → peringatan browser sekali. Hilang setelah pakai domain.
 - Satu password untuk satu operator; belum ada multi-user atau 2FA.
 - Rate limit login disimpan di file, cukup untuk satu instance saja.
 
@@ -224,21 +222,21 @@ lo buka chartnya.** Kalau lo pakai sebagai tombol "entry otomatis", lo bakar dui
 ### Buka di browser
 
 ```text
-https://IP-VPS
+https://scansignal.my.id
 ```
 
-Ganti `IP-VPS` dengan alamat VPS lo sendiri. Perhatikan **`https`**, bukan
-`http`, dan **tanpa** `:8643`. Port 8643 sekarang cuma bisa diakses dari dalam
-VPS; dari internet yang terbuka hanya 80 (dialihkan otomatis ke HTTPS) dan 443.
+`www.scansignal.my.id` juga jalan. Perhatikan **`https`**, bukan `http`, dan
+**tanpa** `:8643`. Port 8643 cuma bisa diakses dari dalam VPS; dari internet yang
+terbuka hanya 80 (dialihkan otomatis ke HTTPS) dan 443.
 
-Pertama kali buka, browser menampilkan peringatan sertifikat — itu **normal**
-karena sertifikatnya self-signed, bukan dari Let's Encrypt. Klik `Advanced` lalu
-`Proceed`. Koneksinya tetap terenkripsi, jadi password lo tidak dikirim polos.
+Sertifikatnya asli dari Let's Encrypt, jadi **tidak ada peringatan browser** —
+ikon kunci langsung hijau. Kalau lo masih lihat peringatan, berarti lo membuka
+lewat alamat IP, bukan lewat domain; sertifikat hanya sah untuk nama domain.
 
-Yang muncul setelah itu adalah **halaman login**, bukan dashboard. Password awal
+Yang muncul pertama adalah **halaman login**, bukan dashboard. Password awal
 `098123plm`; baca bagian 0b untuk sesi 2 jam dan cara menggantinya.
 
-Kalau lo pakai `http://IP-VPS:8643` seperti dulu, hasilnya timeout. Itu
+Kalau lo pakai `http://scansignal.my.id:8643` seperti dulu, hasilnya timeout. Itu
 disengaja: kalau port itu terbuka, orang bisa melewati nginx dan HTTPS-nya, lalu
 menarik data lewat HTTP polos.
 
@@ -336,82 +334,90 @@ container hanya listen di loopback.
 
 | Bagian | Nilai |
 |---|---|
+| Domain | `scansignal.my.id` + `www.scansignal.my.id` |
 | nginx | 1.28.3, port 80 (redirect 301) dan 443 |
-| Sertifikat | self-signed untuk IP VPS, SAN `IP:<ip>`, berlaku 10 tahun |
-| Config aktif | `/etc/nginx/sites-enabled/screener` (dari `deploy/nginx/screener-selfsigned.conf`) |
+| Sertifikat | **Let's Encrypt asli** (issuer `YE1`), SAN dua domain, berlaku 90 hari |
+| Auto-renew | `certbot.timer` enabled + active, `renew --dry-run` sukses |
+| Config aktif | `/etc/nginx/sites-enabled/screener` (dari `deploy/nginx/screener.conf`) |
 | Container | `127.0.0.1:8643` — tertutup dari internet |
-| Cookie | `SCREENER_COOKIE_SECURE=1` → `Secure` aktif |
+| Cookie | `SCREENER_COOKIE_SECURE=1` → `Secure` + HSTS aktif |
 | Port 8642 | tidak disentuh, tidak di-proxy |
 
 `sites-enabled/default` bawaan nginx sudah dinonaktifkan supaya tidak menyerobot
 `default_server` di port 80.
 
-Untuk domain asli, pakai `deploy/nginx/screener.conf`.
+Sertifikat lama yang self-signed masih ada di `/etc/nginx/ssl/` dan confignya di
+`deploy/nginx/screener-selfsigned.conf` — dipakai hanya kalau lo perlu jalan tanpa
+domain. Selama domain aktif, yang berlaku adalah `screener.conf`.
 
-Langkah pemasangan kalau perlu diulang. Bikin sertifikat self-signed — SAN IP
-wajib, browser modern menolak sertifikat yang cuma punya `CN`:
-
-```bash
-VPS_IP=$(curl -s ifconfig.me)          # atau tulis manual
-sudo mkdir -p /etc/nginx/ssl
-sudo openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
-  -keyout /etc/nginx/ssl/screener-selfsigned.key \
-  -out /etc/nginx/ssl/screener-selfsigned.crt \
-  -subj "/CN=$VPS_IP" -addext "subjectAltName=IP:$VPS_IP"
-sudo chmod 600 /etc/nginx/ssl/screener-selfsigned.key
-```
-
-Pasang config nginx dan aktifkan:
+Verifikasi dari luar VPS — tidak perlu `-k` lagi karena sertifikatnya dipercaya:
 
 ```bash
-sudo cp ~/Screener/deploy/nginx/screener-selfsigned.conf \
-        /etc/nginx/sites-available/screener
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo ln -sf /etc/nginx/sites-available/screener /etc/nginx/sites-enabled/screener
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-`nginx -t` dulu sebelum reload — kalau config salah, reload gagal dan situs mati
-tanpa penjelasan.
-
-Verifikasi dari luar VPS (`-k` karena sertifikatnya self-signed):
-
-```bash
-curl -sI  http://$VPS_IP/          # 301 ke https
-curl -skI https://$VPS_IP/login    # 200
-curl -sk -o /dev/null -w '%{http_code}\n' https://$VPS_IP/api/market   # 401
-curl -s  -o /dev/null -w '%{http_code}\n' http://$VPS_IP:8643/login    # harus gagal
+DOM=scansignal.my.id
+curl -sI  http://$DOM/               # 301 ke https
+curl -sI  https://$DOM/login         # HTTP/2 200
+curl -s -o /dev/null -w '%{http_code}\n' https://$DOM/api/market   # 401
+curl -s -o /dev/null -w '%{http_code}\n' http://$DOM:8643/login    # harus gagal
 ```
 
 Baris terakhir **harus gagal** (kode `000` = tidak tersambung). Kalau justru
 `200`, port 8643 masih terbuka ke internet dan HTTPS lo bisa dilewati.
 
-Catatan: HSTS **tidak** dikirim oleh nginx pada mode self-signed. Kalau HTTPS
-dipaksa-pin sementara sertifikatnya tidak dipercaya, browser akan menolak situs
-sepenuhnya dan lo kehilangan opsi klik-lewat.
+Kalau `curl` tanpa `-k` sukses, artinya rantai sertifikatnya sah — itu bukti yang
+lebih kuat daripada melihat ikon kunci di browser.
 
-### Naik ke Let's Encrypt setelah punya domain
+### Cara sertifikat Let's Encrypt dipasang (sudah dilakukan)
 
-Peringatan sertifikat hilang hanya kalau ada domain; Let's Encrypt tidak
-menerbitkan sertifikat untuk IP mentah.
+Ada skrip yang mengerjakan seluruh urutan ini dan **menolak jalan** kalau
+prasyaratnya belum benar, supaya tidak gagal separuh jalan:
 
 ```bash
-# 1. arahkan A record domain ke IP VPS, tunggu propagasi
-# 2. pasang certbot
-sudo apt update && sudo apt install -y certbot python3-certbot-nginx
-
-# 3. pakai config versi domain, ganti server_name-nya dulu
-sudo cp ~/Screener/deploy/nginx/screener.conf /etc/nginx/sites-available/screener
-sudo nano /etc/nginx/sites-available/screener   # ganti screener.example.com
-
-# 4. terbitkan sertifikat
-sudo certbot --nginx -d screener.domain-lo.com
-sudo nginx -t && sudo systemctl reload nginx
+cd ~/Screener && git pull origin main
+bash deploy/enable-letsencrypt.sh scansignal.my.id www.scansignal.my.id
 ```
 
-Setelah itu buka pakai nama domain, bukan IP. `SCREENER_COOKIE_SECURE` sudah
-menyala jadi tidak perlu diubah. Certbot memasang timer perpanjangan otomatis;
-cek dengan `sudo certbot renew --dry-run`.
+Enam langkahnya: cek A record → uji ACME path lewat HTTP → pasang certbot →
+terbitkan sertifikat → pasang vhost domain → verifikasi + `renew --dry-run`.
+
+**Dua prasyarat yang paling sering bikin gagal.**
+
+Pertama, A record domain harus sudah menunjuk IP VPS. Let's Encrypt memvalidasi
+dengan mengambil `http://<domain>/.well-known/acme-challenge/…`, jadi kalau
+domainnya masih nunjuk hosting lain, permintaan itu mendarat di server yang salah
+dan validasinya pasti gagal. Cek dulu:
+
+```bash
+getent hosts scansignal.my.id      # harus keluar IP VPS lo
+curl -s ifconfig.me                # IP VPS, jalankan di VPS
+```
+
+Kedua, path ACME **tidak boleh** ikut di-redirect ke HTTPS. Ini jebakan yang
+kejadian waktu pemasangan: config port 80 mengalihkan *semua* request ke HTTPS,
+termasuk `/.well-known/acme-challenge/`, sehingga certbot ketemu sertifikat
+self-signed yang tidak dipercaya dan gagal. Perbaikannya satu baris sebelum
+`return 301`:
+
+```nginx
+location /.well-known/acme-challenge/ { root /var/www/html; }
+location / { return 301 https://$host$request_uri; }
+```
+
+Setiap kegagalan validasi dihitung ke rate limit Let's Encrypt, jadi uji dulu
+manual sebelum memanggil certbot:
+
+```bash
+echo tes | sudo tee /var/www/html/.well-known/acme-challenge/tes
+curl -s http://scansignal.my.id/.well-known/acme-challenge/tes   # harus balas "tes"
+sudo rm /var/www/html/.well-known/acme-challenge/tes
+```
+
+Perpanjangan otomatis sudah aktif (`certbot.timer`). Cek kapan saja:
+
+```bash
+systemctl list-timers | grep certbot
+sudo certbot certificates
+sudo certbot renew --dry-run
+```
 
 **Di mana flag `SCREENER_COOKIE_SECURE` ditulis?** Di blok `environment:` service
 `screener-dashboard` pada `~/ai-stack/docker-compose.yml` — **bukan** di `.env`.
@@ -429,7 +435,7 @@ bikin `.env.local` di folder repo berisi satu baris `SCREENER_COOKIE_SECURE=1`
 Verifikasi setelah domain aktif:
 
 ```bash
-DOM=screener.domain-lo.com
+DOM=scansignal.my.id
 curl -sI https://$DOM/login | grep -i strict-transport
 curl -si https://$DOM/api/auth/login -X POST \
   -H "Origin: https://$DOM" -H 'Content-Type: application/json' \
@@ -1900,8 +1906,8 @@ Jadi jangan pernah menempelkan angka 77% ke dashboard ini.
 - **Sesi mati 2 jam idle**, dan 10 kali salah password mengunci login 15 menit.
 - **Ada TLS** di port 443, port 80 dialihkan otomatis, dan port `8643` tidak bisa
   dijangkau dari internet.
-- **Sertifikatnya self-signed**, jadi browser memberi peringatan sekali.
-  Enkripsinya jalan; yang belum ada penjamin identitas dari luar.
+- **Sertifikatnya asli dari Let's Encrypt** untuk `scansignal.my.id` dan
+  `www.scansignal.my.id`; perpanjangan otomatis lewat `certbot.timer`.
 - **Satu operator saja.** Belum ada multi-user, role, atau 2FA.
 - **Password awal `098123plm` harus diganti.** Lihat bagian 0c.
 - **Nggak ada API key Binance** di mana pun. Semua endpoint yang dipakai
@@ -1968,8 +1974,10 @@ jawabannya `429`. Tunggu 15 menit, atau reset dengan menghapus `auth.json` di at
 
 ### Peringatan sertifikat di browser
 
-Normal: sertifikatnya self-signed. Klik `Advanced` lalu `Proceed`. Kalau mau hilang
-permanen, butuh domain — lihat bagian Let's Encrypt di bagian 2.
+Seharusnya sudah tidak ada, karena sertifikatnya asli. Kalau tetap muncul, cek dua
+hal ini dulu: lo membuka lewat **domain** (bukan alamat IP — sertifikat hanya sah
+untuk nama domain), dan sertifikatnya belum kedaluwarsa (`sudo certbot certificates`
+di VPS). Kalau perpanjangan otomatis gagal, `sudo certbot renew` memaksa sekarang.
 
 ### Semua kolom konteks `—`
 
