@@ -168,9 +168,28 @@ Nggak semua angka di layar update bareng. Ada tiga lapis, sengaja dibedain:
 
 | Yang update | Seberapa cepat | Kenapa segitu |
 |---|---|---|
-| **Harga (mark price)** | realtime, ±1 detik | WebSocket langsung dari Binance. Murah, nggak ada rate limit. |
+| **Harga (mark price)** | ±1 detik (WebSocket) atau 3 detik (polling) | WebSocket dipakai kalau tersambung; kalau nggak, otomatis fallback ke polling `/api/price`. |
 | **Funding, OI, ratio** | tiap 20 detik | Data ini sendiri cuma berubah tiap 5–15 menit di Binance. Lebih cepat = boros request, nggak ada gunanya. |
 | **Sinyal & skor** | tiap 60 detik | Indikator dihitung dari candle 30m yang **sudah tutup**. Sebelum candle tutup, angkanya nggak berubah. |
+
+### Indikator sumber harga
+
+Di header dan di bawah tiap harga ada label sumber feed:
+
+```text
+LIVE · WEBSOCKET   →  frame WebSocket masuk, update ±1 detik
+LIVE · POLLING 3S  →  WebSocket diam/diblokir, harga dari REST tiap 3 detik
+MENGHUBUNGKAN…     →  belum ada harga masuk sama sekali
+```
+
+Kenapa ada fallback: di sebagian jaringan dan browser, koneksi ke
+`wss://fstream.binance.com` **berhasil terbuka tapi tidak pernah mengirim data**.
+Ini sudah diuji langsung dan terbukti terjadi. Kalau cuma bergantung pada
+WebSocket, harga akan diam total tanpa pesan error apa pun.
+
+Jadi sekarang polling jalan lebih dulu, dan berhenti sendiri begitu ada frame
+WebSocket nyata masuk. Kalau WebSocket diam lagi lebih dari 5 detik, polling
+otomatis lanjut. Harga tidak akan pernah beku tanpa penjelasan.
 
 Jadi kalau lo lihat harga bergerak terus tapi skor diam di `4/6` — itu **bukan bug**.
 Skor cuma bisa berubah saat candle 30 menit berikutnya tutup.
@@ -1190,6 +1209,26 @@ curl -s http://127.0.0.1:8643/api/context
 }
 ```
 
+### GET /api/price
+
+Mark price semua coin dalam satu request. Ini fallback yang dipakai frontend
+tiap 3 detik saat WebSocket tidak mengirim data.
+
+```bash
+curl -s http://127.0.0.1:8643/api/price
+```
+
+```json
+{
+  "ts": 1787904249002,
+  "prices": { "BTC": 79797.0, "ETH": 2501.74, "AVAX": 7.4282 }
+}
+```
+
+Endpoint ini memakai `premiumIndex` **tanpa filter symbol**, jadi satu request
+ke Binance mengembalikan semua market sekaligus — biaya upstream-nya tetap
+satu request berapa pun jumlah coin yang dipantau.
+
 ### GET /api/candles?coin=BTC
 
 120 candle 30m terakhir plus overlay indikator. Dipakai chart.
@@ -1588,9 +1627,22 @@ Kalau `502 data unavailable`, Binance nggak mengembalikan candle cukup
 
 ### Harga diam / WebSocket mati
 
-WebSocket ke `wss://fstream.binance.com` diblokir jaringan atau browser.
-Harga akan tetap update tiap 60 detik lewat `/api/market`, cuma nggak
-realtime. Cek Console di browser (F12) buat lihat error-nya.
+Cek label di header dulu:
+
+- `LIVE · POLLING 3S` → WebSocket memang diam, tapi harga **tetap jalan**
+  lewat REST tiap 3 detik. Ini normal, nggak perlu diapa-apain.
+- `MENGHUBUNGKAN…` yang nggak hilang → fallback-nya juga gagal. Cek:
+
+```bash
+curl -s http://127.0.0.1:8643/api/price | head -c 200
+```
+
+Kalau balasannya `502`, server nggak bisa menghubungi Binance. Cek koneksi
+keluar dari host:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://fapi.binance.com/fapi/v1/premiumIndex
+```
 
 ### Statistik berubah drastis tiap dihitung
 

@@ -24,6 +24,9 @@ export default function Home() {
   const [hideStale, setHideStale] = useState(false);
   const [loading, setLoading] = useState(false);
   const [chartCoin, setChartCoin] = useState<string | null>(null);
+  // "WS" once a frame actually arrives; "POLL" while the REST fallback drives prices.
+  const [feed, setFeed] = useState<"WS" | "POLL" | "OFF">("OFF");
+  const [tick, setTick] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,16 +41,6 @@ export default function Home() {
   useEffect(() => {
     load();
     const indicators = setInterval(load, 60000);
-    const streams = COINS.map((c) => `${c.toLowerCase()}usdt@markPrice@1s`).join("/");
-    const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`);
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        const price = Number(msg.data?.p);
-        const coin = msg.data?.s?.replace("USDT", "");
-        if (coin && price) setRows((cur) => cur.map((r) => (r.coin === coin ? { ...r, price } : r)));
-      } catch {}
-    };
     const context = setInterval(async () => {
       try {
         const response = await fetch("/api/context", { cache: "no-store" });
@@ -55,7 +48,57 @@ export default function Home() {
         setRows((cur) => cur.map((r) => ({ ...r, ...(data[r.coin] ?? {}) })));
       } catch {}
     }, 20000);
-    return () => { clearInterval(indicators); clearInterval(context); ws.close(); };
+
+    // Mark price: prefer the websocket, but never depend on it. Some networks and
+    // browsers complete the upgrade to fstream and then deliver zero frames, which
+    // silently freezes the price. Polling starts immediately and only stops once a
+    // real frame lands; if the socket goes quiet again, polling resumes.
+    let lastFrame = 0;
+    let closed = false;
+    let socket: WebSocket | null = null;
+
+    const applyPrices = (prices: Record<string, number>) => {
+      setRows((cur) => cur.map((r) => (prices[r.coin] ? { ...r, price: prices[r.coin] } : r)));
+      setTick(new Date());
+    };
+
+    const poll = async () => {
+      if (closed || Date.now() - lastFrame < 5000) return;
+      try {
+        const response = await fetch("/api/price", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (closed || Date.now() - lastFrame < 5000) return;
+        applyPrices(data.prices ?? {});
+        setFeed("POLL");
+      } catch {}
+    };
+
+    poll();
+    const prices = setInterval(poll, 3000);
+
+    try {
+      const streams = COINS.map((c) => `${c.toLowerCase()}usdt@markPrice@1s`).join("/");
+      socket = new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`);
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          const price = Number(msg.data?.p);
+          const coin = msg.data?.s?.replace("USDT", "");
+          if (!coin || !Number.isFinite(price)) return;
+          lastFrame = Date.now();
+          setFeed("WS");
+          setRows((cur) => cur.map((r) => (r.coin === coin ? { ...r, price } : r)));
+          setTick(new Date());
+        } catch {}
+      };
+    } catch { /* fallback polling already running */ }
+
+    return () => {
+      closed = true;
+      clearInterval(indicators); clearInterval(context); clearInterval(prices);
+      try { socket?.close(); } catch {}
+    };
   }, [load]);
 
   const shown = useMemo(() => rows.filter((r) => {
@@ -75,7 +118,12 @@ export default function Home() {
   return <main>
     <header className="topbar">
       <div className="brand"><span className="mark">◎</span><div><b>SCREENER</b><small>FUTURES INTELLIGENCE</small></div></div>
-      <div className="status"><span className="pulse" /> LIVE MARKET DATA <button onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button></div>
+      <div className="status">
+        <span className={`pulse ${feed === "OFF" ? "dead" : ""}`} />
+        {feed === "WS" ? "LIVE · WEBSOCKET" : feed === "POLL" ? "LIVE · POLLING 3S" : "MENGHUBUNGKAN…"}
+        {tick && <em className="tick">{tick.toLocaleTimeString("id-ID")}</em>}
+        <button onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
+      </div>
     </header>
 
     <section className="hero">
@@ -123,7 +171,7 @@ export default function Home() {
           <span className={`badge ${r.sig?.toLowerCase() ?? "wait"}`}>{r.sig ?? "WAIT"}</span>
         </div>
 
-        <div className="price">{money(r.price)}<span>REALTIME MARK PRICE</span></div>
+        <div className="price">{money(r.price)}<span>MARK PRICE · {feed === "WS" ? "WEBSOCKET" : feed === "POLL" ? "POLLING 3S" : "MENUNGGU"}</span></div>
 
         <div className="tags">
           <span className={`tag st-${state.toLowerCase()}`}>{state}</span>
