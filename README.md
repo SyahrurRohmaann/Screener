@@ -67,8 +67,15 @@ Ranking snapshots live at `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl`. The
 frozen formation schedule is Monday 08:00 UTC (30-minute window). Keep `/data`
 mounted and back up the whole file; never edit or backfill JSONL lines. Snapshot
 POSTs fail closed unless `RANKING_SNAPSHOT_TOKEN` is configured, and require both
-a same-origin `Origin` plus `Authorization: Bearer <token>`. Do not expose this
-site publicly without authentication and TLS.
+a same-origin `Origin` plus `Authorization: Bearer <token>`. The operator token is
+typed into the browser at snapshot time, so only serve this page over TLS on a
+trusted host. Do not expose this site publicly without authentication and TLS.
+
+Failed formation attempts are appended to `${SCREENER_DATA_DIR}/ranking-attempts.jsonl`
+so a retry inside the same 30-minute window can still form a legitimate snapshot; back
+up that file alongside the ledger. If a process is killed mid-write, a
+`ranking-snapshots.jsonl.lock` file may remain — it is reclaimed automatically after
+30 seconds.
 
 `SCREENER_MIN_SCORE` defaults to `4`. A threshold of `2` matches the old backtest
 candidate but fires on nearly every market while the trend is up, which removes the

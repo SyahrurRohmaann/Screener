@@ -22,4 +22,16 @@ Canonical specification (everything between `BEGIN CANONICAL` and `END CANONICAL
 
 Risks shown in product: fixed-current-universe survivorship bias; all history was viewed; late 63 weeks lost 33.9%; historical max drawdown approximately 70%; breadth gate unvalidated; one observation per week; paper fills differ from real fills; past performance is no guarantee.
 
+Cost accounting (non-canonical implementation detail, symmetric by construction): both the
+top-4 book and the equal-weight-16 benchmark are charged `RANKING_ROUND_TRIP_COST_PCT`
+(default 0.14%, taker 0.05%/side plus slippage) multiplied by their own membership turnover.
+The benchmark therefore pays once to establish its position and nothing while its membership
+is unchanged, while the strategy pays on every rebalance. Neither book trades for free and
+neither is charged a round trip it does not make.
+
+Formation attempts that fail on incomplete data are logged to `ranking-attempts.jsonl`,
+outside the immutable ledger, so a retry inside the same 30-minute window can still form a
+legitimate OPEN snapshot. Once the window has elapsed the week is closed exactly once:
+INVALID when at least one attempt failed, MISSED when no attempt was made.
+
 Canonical SHA-256: `02abfad675d23211de4af3f39c5bc011f465e5926a1337f635d178539d6ef48a`
