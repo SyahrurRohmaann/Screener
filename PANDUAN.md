@@ -9,6 +9,7 @@ Ditulis untuk pemula. Kalau ada istilah yang belum jelas, cek **Kamus Istilah** 
 
 0. [Eksperimen forward ranking](#0-eksperimen-forward-ranking)
 0b. [Login, sesi, dan ganti password](#0b-login-sesi-dan-ganti-password)
+0c. [Keamanan: yang wajib lo lakukan](#0c-keamanan-yang-wajib-lo-lakukan)
 1. [Screener ini apa, dan bukan apa](#1-screener-ini-apa-dan-bukan-apa)
 2. [Cara buka dan jalanin](#2-cara-buka-dan-jalanin)
 3. [Tur layar: apa saja yang kelihatan](#3-tur-layar-apa-saja-yang-kelihatan)
@@ -52,8 +53,9 @@ Data 15/16 adalah `INCOMPLETE` dan tidak boleh menjadi snapshot.
 Data ada di `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl` (biasanya `/data`).
 Untuk backup/restore: hentikan app, salin/pulihkan file utuh, lalu start lagi;
 jangan merge atau edit baris. Volume `screener_data:/data` harus tetap terpasang
-saat recreate. POST snapshot wajib same-origin dan, jika dikonfigurasi, Bearer
-`RANKING_SNAPSHOT_TOKEN`. Jangan ekspos website tanpa auth/TLS.
+saat recreate. POST snapshot wajib sudah login, same-origin, **dan** membawa
+Bearer `RANKING_SNAPSHOT_TOKEN` — tanpa token terkonfigurasi endpoint itu mati
+total (fail closed). Situsnya kini sudah di balik login dan HTTPS.
 
 Ini paper research, melarang uang nyata dan leverage. Fixed universe punya
 survivorship bias; late sample historis rugi 33,9%; drawdown historis sekitar
@@ -118,21 +120,69 @@ Yang terjadi setelah berhasil:
 Kalau password sekarang salah, jawabannya `Password sekarang salah.` dan tidak
 ada yang berubah. Kalau password baru di bawah 8 karakter, juga ditolak.
 
-### TLS: wajib kalau diakses dari luar
+### TLS: sudah terpasang
 
-Password dikirim dari browser ke server saat login. Tanpa HTTPS, kiriman itu
-polos di jaringan. Jadi:
+Password dikirim dari browser ke server saat login, jadi tanpa HTTPS kiriman itu
+polos di jaringan. Di VPS, TLS **sudah aktif**: nginx memegang 443, port 80
+dialihkan otomatis ke HTTPS, dan `SCREENER_COOKIE_SECURE=1` sudah menyala
+sehingga cookie sesi ditandai `Secure`. Detail pemasangan ada di bagian 2.
 
-1. pasang TLS di depan container, misalnya Caddy atau nginx di port 443 yang
-   meneruskan ke `8643`;
-2. baru setelah HTTPS jalan, set `SCREENER_COOKIE_SECURE=1`.
+Sertifikatnya masih self-signed, jadi browser memberi peringatan sekali. Itu
+bukan kerusakan: enkripsinya jalan, yang belum ada adalah pihak ketiga yang
+menjamin identitas server. Peringatan itu hilang kalau nanti pakai domain.
 
-Urutannya penting. Flag itu sengaja tidak diikat ke `NODE_ENV`: kalau cookie
-ditandai `Secure` padahal situsnya masih HTTP biasa, browser tidak akan pernah
-mengirim cookie balik dan login akan muter terus tanpa pesan error yang jelas.
+Kalau lo memasang ini di tempat lain, urutannya penting: **HTTPS dulu, flag
+kemudian**. Flag itu sengaja tidak diikat ke `NODE_ENV` — kalau cookie ditandai
+`Secure` padahal situsnya masih HTTP biasa, browser tidak akan pernah mengirim
+cookie balik dan login akan muter terus tanpa pesan error yang jelas.
 
-Dengan flag menyala, cookie ditandai `Secure` dan header HSTS dikirim. Selama
-belum ada TLS, biarkan flag mati dan jangan buka portnya ke internet.
+---
+
+## 0c. Keamanan: yang wajib lo lakukan
+
+Dua hal ini belum beres dan hanya lo yang bisa menyelesaikannya.
+
+### 1. Ganti password web
+
+Password `098123plm` tertulis di file ini, ada di riwayat chat, dan kebetulan
+sama dengan passphrase kunci SSH. Kalau salah satu bocor, dua-duanya ikut jebol.
+Login, klik `AKUN`, ganti ke password yang **berbeda** dari passphrase SSH.
+
+### 2. Rotasi kunci SSH VPS
+
+Kunci privat VPS pernah dikirim lewat chat, jadi anggap sudah tidak rahasia.
+Bikin kunci baru lalu buang yang lama:
+
+```bash
+# di VPS
+ssh-keygen -t ed25519 -C "laptop-alung" -f ~/.ssh/id_ed25519_new
+cat ~/.ssh/id_ed25519_new.pub >> ~/.ssh/authorized_keys
+
+# tes dari mesin lo, JANGAN tutup sesi lama dulu
+ssh -i ~/.ssh/id_ed25519_new ubuntu@IP-VPS 'echo OK'
+
+# kalau berhasil, hapus baris kunci lama
+nano ~/.ssh/authorized_keys
+```
+
+Jangan hapus kunci lama sebelum kunci baru terbukti bisa login — kalau keliru
+urutannya, lo terkunci di luar VPS sendiri.
+
+### Yang sudah dikerjakan (tidak perlu lo urus)
+
+- Semua halaman dan API tertutup di balik login; tanpa sesi, API menjawab `401`.
+- Password disimpan sebagai hash `scrypt` + salt acak, file mode `600`.
+- Sesi mati setelah 2 jam idle; 10 kali salah password mengunci login 15 menit.
+- Port `8643` ditutup dari internet, hanya nginx yang boleh menjangkaunya.
+- HTTPS aktif di 443, HTTP 80 dialihkan otomatis.
+- Header `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, `same-origin` aktif.
+- Token snapshot acak disimpan mode `600`, tidak pernah masuk repo.
+
+### Yang masih jadi batasan
+
+- Sertifikat self-signed → peringatan browser sekali. Hilang setelah pakai domain.
+- Satu password untuk satu operator; belum ada multi-user atau 2FA.
+- Rate limit login disimpan di file, cukup untuk satu instance saja.
 
 ---
 
@@ -174,12 +224,23 @@ lo buka chartnya.** Kalau lo pakai sebagai tombol "entry otomatis", lo bakar dui
 ### Buka di browser
 
 ```text
-http://16.79.198.38:8643
+https://IP-VPS
 ```
 
-Nggak ada login. Kalau alamat ini bisa dibuka orang lain, mereka juga lihat
-dashboard yang sama — tapi mereka nggak bisa apa-apa selain lihat, karena
-dashboard ini nggak nyambung ke akun trading mana pun.
+Ganti `IP-VPS` dengan alamat VPS lo sendiri. Perhatikan **`https`**, bukan
+`http`, dan **tanpa** `:8643`. Port 8643 sekarang cuma bisa diakses dari dalam
+VPS; dari internet yang terbuka hanya 80 (dialihkan otomatis ke HTTPS) dan 443.
+
+Pertama kali buka, browser menampilkan peringatan sertifikat — itu **normal**
+karena sertifikatnya self-signed, bukan dari Let's Encrypt. Klik `Advanced` lalu
+`Proceed`. Koneksinya tetap terenkripsi, jadi password lo tidak dikirim polos.
+
+Yang muncul setelah itu adalah **halaman login**, bukan dashboard. Password awal
+`098123plm`; baca bagian 0b untuk sesi 2 jam dan cara menggantinya.
+
+Kalau lo pakai `http://IP-VPS:8643` seperti dulu, hasilnya timeout. Itu
+disengaja: kalau port itu terbuka, orang bisa melewati nginx dan HTTPS-nya, lalu
+menarik data lewat HTTP polos.
 
 ### Jalanin di server (Docker Compose)
 
@@ -188,12 +249,12 @@ Di `~/ai-stack/docker-compose.yaml`:
 ```yaml
   screener-dashboard:
     build:
-      context: /home/Screener
+      context: /home/ubuntu/Screener
       dockerfile: Dockerfile
     container_name: screener_dashboard
     restart: unless-stopped
     ports:
-      - "8643:3000"
+      - "127.0.0.1:8643:3000"
     volumes:
       - screener_data:/data
     environment:
@@ -202,9 +263,8 @@ Di `~/ai-stack/docker-compose.yaml`:
       SCREENER_COINS: BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT
       SCREENER_MIN_SCORE: "4"
       SCREENER_FEE_PCT: "0.1"
-      RANKING_SNAPSHOT_TOKEN: "isi-token-acak-panjang"
-      # Nyalakan HANYA setelah TLS jalan (lihat bagian 0b):
-      # SCREENER_COOKIE_SECURE: "1"
+      SCREENER_COOKIE_SECURE: "1"
+      RANKING_SNAPSHOT_TOKEN: "<token acak, lihat ~/Screener/.snapshot-token>"
     networks:
       - ai-network
 
@@ -214,8 +274,26 @@ volumes:
 
 Deploy / update:
 
+Dua baris yang gampang salah:
+
+- `127.0.0.1:8643:3000` — tanpa `127.0.0.1:` di depan, port 8643 terbuka ke
+  seluruh internet dan siapa pun bisa melewati nginx beserta HTTPS-nya. Angka
+  `3000` di kanan adalah port Next.js di dalam container, jangan diubah.
+- `SCREENER_COOKIE_SECURE: "1"` — aman dinyalakan **karena** HTTPS sudah jalan.
+  Jangan nyalakan di lingkungan yang masih HTTP biasa.
+
+Token snapshot dibuat sekali, disimpan mode 600. Kalau hilang, bikin baru lalu
+samakan nilainya di compose:
+
 ```bash
-cd /home/Screener && git pull origin main
+head -c 32 /dev/urandom | base64 | tr -d '\n=/+' > ~/Screener/.snapshot-token
+chmod 600 ~/Screener/.snapshot-token
+```
+
+Deploy / update (jalankan sebagai user `ubuntu` di VPS):
+
+```bash
+cd ~/Screener && git pull origin main
 cd ~/ai-stack
 docker compose build screener-dashboard
 docker compose up -d --force-recreate screener-dashboard
@@ -225,91 +303,152 @@ docker compose ps
 Yang benar keluar:
 
 ```text
-screener_dashboard   Up   0.0.0.0:8643->3000/tcp
+screener_dashboard   Up   127.0.0.1:8643->3000/tcp
 ```
 
-> **Penting:** mapping-nya `8643:3000`, bukan `8643:8643`. Next.js di dalam
-> container listen di port 3000. Port 8642 milik Hermes Gateway — jangan disentuh.
+Kalau yang muncul `0.0.0.0:8643->3000/tcp`, prefix `127.0.0.1:` hilang dan app lo
+terekspos langsung ke internet — perbaiki compose lalu recreate.
+
+> **Penting:** port 8642 milik Hermes Gateway — jangan disentuh, jangan di-proxy.
+
+Cek cepat setelah deploy, dari dalam VPS:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8643/login      # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8643/api/market # 401
+```
+
+`401` pada `/api/market` justru tanda benar: tanpa login, API tidak memberi data.
 
 ### TLS di depan container
 
-Kondisi terpasang saat ini (VPS `16.79.198.38`): nginx 1.28 di port 80/443,
-sertifikat **self-signed** untuk IP tersebut, `SCREENER_COOKIE_SECURE: "1"` aktif,
-dan container hanya listen di `127.0.0.1:8643` sehingga tidak bisa dijangkau
-langsung dari internet. Karena sertifikatnya self-signed, browser menampilkan
-peringatan sekali yang harus lo lewati — koneksinya tetap terenkripsi, jadi
-password tidak dikirim polos. Ganti ke sertifikat Let's Encrypt begitu ada domain.
+Next.js tidak memegang sertifikat sendiri; nginx yang menerima HTTPS lalu
+meneruskan ke app:
 
-Config yang dipakai: `deploy/nginx/screener-selfsigned.conf`. Untuk domain asli,
-pakai `deploy/nginx/screener.conf`.
+```text
+browser --HTTPS 443--> nginx --HTTP 127.0.0.1:8643--> container Next.js
+```
 
-Bikin sertifikat self-signed (10 tahun, dengan SAN IP supaya browser modern mau):
+Hop kedua memang HTTP biasa, tapi aman karena tidak pernah keluar dari mesin:
+container hanya listen di loopback.
+
+**Kondisi terpasang saat ini:**
+
+| Bagian | Nilai |
+|---|---|
+| nginx | 1.28.3, port 80 (redirect 301) dan 443 |
+| Sertifikat | self-signed untuk IP VPS, SAN `IP:<ip>`, berlaku 10 tahun |
+| Config aktif | `/etc/nginx/sites-enabled/screener` (dari `deploy/nginx/screener-selfsigned.conf`) |
+| Container | `127.0.0.1:8643` — tertutup dari internet |
+| Cookie | `SCREENER_COOKIE_SECURE=1` → `Secure` aktif |
+| Port 8642 | tidak disentuh, tidak di-proxy |
+
+`sites-enabled/default` bawaan nginx sudah dinonaktifkan supaya tidak menyerobot
+`default_server` di port 80.
+
+Untuk domain asli, pakai `deploy/nginx/screener.conf`.
+
+Langkah pemasangan kalau perlu diulang. Bikin sertifikat self-signed — SAN IP
+wajib, browser modern menolak sertifikat yang cuma punya `CN`:
 
 ```bash
+VPS_IP=$(curl -s ifconfig.me)          # atau tulis manual
 sudo mkdir -p /etc/nginx/ssl
 sudo openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
   -keyout /etc/nginx/ssl/screener-selfsigned.key \
   -out /etc/nginx/ssl/screener-selfsigned.crt \
-  -subj "/CN=16.79.198.38" -addext "subjectAltName=IP:16.79.198.38"
+  -subj "/CN=$VPS_IP" -addext "subjectAltName=IP:$VPS_IP"
 sudo chmod 600 /etc/nginx/ssl/screener-selfsigned.key
 ```
+
+Pasang config nginx dan aktifkan:
+
+```bash
+sudo cp ~/Screener/deploy/nginx/screener-selfsigned.conf \
+        /etc/nginx/sites-available/screener
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf /etc/nginx/sites-available/screener /etc/nginx/sites-enabled/screener
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`nginx -t` dulu sebelum reload — kalau config salah, reload gagal dan situs mati
+tanpa penjelasan.
+
+Verifikasi dari luar VPS (`-k` karena sertifikatnya self-signed):
+
+```bash
+curl -sI  http://$VPS_IP/          # 301 ke https
+curl -skI https://$VPS_IP/login    # 200
+curl -sk -o /dev/null -w '%{http_code}\n' https://$VPS_IP/api/market   # 401
+curl -s  -o /dev/null -w '%{http_code}\n' http://$VPS_IP:8643/login    # harus gagal
+```
+
+Baris terakhir **harus gagal** (kode `000` = tidak tersambung). Kalau justru
+`200`, port 8643 masih terbuka ke internet dan HTTPS lo bisa dilewati.
 
 Catatan: HSTS **tidak** dikirim oleh nginx pada mode self-signed. Kalau HTTPS
 dipaksa-pin sementara sertifikatnya tidak dipercaya, browser akan menolak situs
 sepenuhnya dan lo kehilangan opsi klik-lewat.
 
-### TLS dengan domain (Let's Encrypt)
+### Naik ke Let's Encrypt setelah punya domain
 
-Sertifikat tidak dipasang di dalam Next.js; taruh reverse proxy di depannya. Contoh
-Caddy (`/etc/caddy/Caddyfile`) — Caddy mengurus sertifikat Let's Encrypt sendiri:
-
-```text
-screener.domain-lo.com {
-    reverse_proxy 127.0.0.1:8643
-}
-```
-
-Setelah `https://` benar-benar jalan, baru nyalakan `SCREENER_COOKIE_SECURE: "1"`.
-
-**Di mana flag ini ditulis?** Kalau deploy pakai Docker Compose (cara utama lo),
-tulis di blok `environment:` service `screener-dashboard` di
-`~/ai-stack/docker-compose.yaml` — bukan di `.env`. Container tidak membaca `.env`
-repo, dan `.env` juga masuk `.gitignore` sehingga tidak ikut ke image. Uncomment
-baris `SCREENER_COOKIE_SECURE: "1"` di contoh compose di atas, lalu:
+Peringatan sertifikat hilang hanya kalau ada domain; Let's Encrypt tidak
+menerbitkan sertifikat untuk IP mentah.
 
 ```bash
-cd ~/ai-stack
-docker compose up -d --force-recreate screener-dashboard
+# 1. arahkan A record domain ke IP VPS, tunggu propagasi
+# 2. pasang certbot
+sudo apt update && sudo apt install -y certbot python3-certbot-nginx
+
+# 3. pakai config versi domain, ganti server_name-nya dulu
+sudo cp ~/Screener/deploy/nginx/screener.conf /etc/nginx/sites-available/screener
+sudo nano /etc/nginx/sites-available/screener   # ganti screener.example.com
+
+# 4. terbitkan sertifikat
+sudo certbot --nginx -d screener.domain-lo.com
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Setelah itu buka pakai nama domain, bukan IP. `SCREENER_COOKIE_SECURE` sudah
+menyala jadi tidak perlu diubah. Certbot memasang timer perpanjangan otomatis;
+cek dengan `sudo certbot renew --dry-run`.
+
+**Di mana flag `SCREENER_COOKIE_SECURE` ditulis?** Di blok `environment:` service
+`screener-dashboard` pada `~/ai-stack/docker-compose.yml` — **bukan** di `.env`.
+Container tidak membaca `.env` milik repo, dan `.env` juga masuk `.gitignore`
+sehingga tidak ikut ke image. Cek nilainya benar-benar masuk:
+
+```bash
 docker compose exec screener-dashboard env | grep SCREENER_COOKIE_SECURE
 ```
 
-Alternatif kalau lo jalanin `npm run start` langsung di host tanpa Docker: bikin
-`.env.local` di folder repo berisi satu baris `SCREENER_COOKIE_SECURE=1` (Next.js
-membacanya otomatis saat start), atau export di shell sebelum start. Jangan pakai
-nama `.env` biasa untuk ini — pakai `.env.local` supaya konsisten dengan
-`.gitignore` yang sudah ada.
+Kalau lo jalanin `npm run start` langsung di host tanpa Docker, alternatifnya
+bikin `.env.local` di folder repo berisi satu baris `SCREENER_COOKIE_SECURE=1`
+(Next.js membacanya otomatis saat start), atau export di shell sebelum start.
 
-Verifikasi:
+Verifikasi setelah domain aktif:
 
 ```bash
-curl -sI https://screener.domain-lo.com/login | grep -i strict-transport
-curl -si https://screener.domain-lo.com/api/auth/login -X POST \
-  -H "Origin: https://screener.domain-lo.com" -H 'Content-Type: application/json' \
-  -d '{"password":"098123plm"}' | grep -i set-cookie
+DOM=screener.domain-lo.com
+curl -sI https://$DOM/login | grep -i strict-transport
+curl -si https://$DOM/api/auth/login -X POST \
+  -H "Origin: https://$DOM" -H 'Content-Type: application/json' \
+  -d '{"password":"PASSWORD-LO"}' | grep -i set-cookie
 ```
 
 Yang benar: header `Strict-Transport-Security` muncul, dan cookie mengandung
-`Secure; HttpOnly; SameSite=Lax`. Kalau login jadi muter tanpa pesan, hampir pasti
-flag `SCREENER_COOKIE_SECURE` menyala sementara aksesnya masih lewat HTTP biasa.
-Setelah TLS aktif, jangan biarkan port `8643` terbuka ke internet — cukup proxy-nya.
+`Secure; HttpOnly; SameSite=Lax`.
 
 ### Jalanin lokal buat ngoprek
 
 ```bash
-cd /home/Screener
+cd ~/Screener
 npm install
 npm run dev     # http://localhost:3000, auto-reload
 ```
+
+Di mode `npm run dev` tanpa TLS, jangan set `SCREENER_COOKIE_SECURE` — kalau
+diset, cookie tidak akan pernah terkirim dan lo tidak bisa login sama sekali.
 
 ---
 
@@ -1344,7 +1483,22 @@ docker compose up -d --force-recreate screener-dashboard
 
 ## 14. API: buat dipakai sendiri
 
-Semua endpoint mengembalikan JSON, tanpa auth.
+Semua endpoint mengembalikan JSON, dan **semuanya butuh login**. Tanpa cookie
+sesi yang sah, jawabannya `401` — termasuk kalau dipanggil dari dalam VPS.
+
+Contoh `curl` di bawah memakai `127.0.0.1:8643` (dari dalam VPS) supaya ringkas.
+Ambil cookie sesinya dulu:
+
+```bash
+curl -s -c /tmp/cookie -X POST http://127.0.0.1:8643/api/auth/login \
+  -H "Origin: http://127.0.0.1:8643" -H 'Content-Type: application/json' \
+  -d '{"password":"PASSWORD-LO"}'
+
+curl -s -b /tmp/cookie http://127.0.0.1:8643/api/market
+```
+
+Jadi tiap contoh di bawah sebenarnya perlu tambahan `-b /tmp/cookie`. Header
+`Origin` hanya wajib untuk `POST`. Cookie itu ikut mati setelah 2 jam idle.
 
 ### GET /api/market
 
@@ -1734,10 +1888,15 @@ Jadi jangan pernah menempelkan angka 77% ke dashboard ini.
 
 ### Keamanan
 
-- **Nggak ada login.** Siapa pun yang bisa akses `16.79.198.38:8643`
-  bisa lihat dashboard. Nggak ada data sensitif di sana, tapi tetap
-  perlu lo tahu.
-- **Nggak ada TLS** (`http://`, bukan `https://`).
+- **Ada login.** Semua halaman dan endpoint API tertutup; tanpa sesi API
+  menjawab `401`. Password disimpan sebagai hash `scrypt` + salt acak.
+- **Sesi mati 2 jam idle**, dan 10 kali salah password mengunci login 15 menit.
+- **Ada TLS** di port 443, port 80 dialihkan otomatis, dan port `8643` tidak bisa
+  dijangkau dari internet.
+- **Sertifikatnya self-signed**, jadi browser memberi peringatan sekali.
+  Enkripsinya jalan; yang belum ada penjamin identitas dari luar.
+- **Satu operator saja.** Belum ada multi-user, role, atau 2FA.
+- **Password awal `098123plm` harus diganti.** Lihat bagian 0c.
 - **Nggak ada API key Binance** di mana pun. Semua endpoint yang dipakai
   publik. Ini disengaja — dashboard ini secara arsitektur **tidak bisa**
   eksekusi order, jadi walaupun ada yang akses, mereka nggak bisa
@@ -1763,11 +1922,47 @@ stop dan risk amount — bukan oleh seberapa besar leverage yang tersedia.
 ```bash
 docker compose ps                    # container hidup?
 docker compose logs --tail 50 screener-dashboard
-curl -i http://127.0.0.1:8643/       # dari dalam host
-ss -ltnp | grep ':8643'              # ada yang listen?
+curl -i http://127.0.0.1:8643/login  # dari dalam VPS, harus 200
+sudo ss -ltnp | grep ':8643'         # harus 127.0.0.1:8643
+sudo nginx -t                        # config nginx sehat?
+sudo systemctl status nginx --no-pager | head -5
 ```
 
-Kalau mapping salah, cek: harus `8643:3000`.
+Kalau `curl` di dalam VPS jalan tapi lewat `https://` tidak, masalahnya di nginx,
+bukan di app. Kalau `ss` menunjukkan `0.0.0.0:8643`, mapping compose-nya salah —
+harus `127.0.0.1:8643:3000`.
+
+### Balik ke halaman login terus
+
+1. **Sesi memang mati.** Idle 2 jam. Login ulang saja.
+2. **Flag `Secure` menyala tapi lo buka lewat `http://`.** Browser tidak mengirim
+   cookie balik, jadi login tampak sukses lalu langsung dilempar ke login lagi.
+   Buka pakai `https://`.
+3. **Volume `/data` tidak terpasang.** `auth.json` hilang tiap recreate:
+   ```bash
+   docker compose exec screener-dashboard sh -c 'ls -la /data/auth.json'
+   ```
+
+### Lupa password
+
+```bash
+docker compose exec screener-dashboard sh -c 'rm -f /data/auth.json'
+docker compose restart screener-dashboard
+```
+
+Password kembali ke `098123plm` dan semua sesi terhapus. Snapshot ranking tidak
+terpengaruh karena tersimpan di file lain (`ranking-snapshots.jsonl`).
+
+### Login terkunci padahal password benar
+
+Sepuluh percobaan gagal dalam 15 menit mengunci login sampai jendela itu lewat;
+jawabannya `429`. Tunggu 15 menit, atau reset dengan menghapus `auth.json` di atas
+(konsekuensinya password ikut kembali ke awal).
+
+### Peringatan sertifikat di browser
+
+Normal: sertifikatnya self-signed. Klik `Advanced` lalu `Proceed`. Kalau mau hilang
+permanen, butuh domain — lihat bagian Let's Encrypt di bagian 2.
 
 ### Semua kolom konteks `—`
 
