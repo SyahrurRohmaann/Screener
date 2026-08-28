@@ -2,6 +2,8 @@
 
 Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScript.
 
+**Panduan lengkap bahasa Indonesia untuk pengguna: [PANDUAN.md](PANDUAN.md)**
+
 ## Features
 
 - Live 30m + 1h market scan from Binance public Futures API
