@@ -7,6 +7,7 @@ Ditulis untuk pemula. Kalau ada istilah yang belum jelas, cek **Kamus Istilah** 
 
 ## Daftar Isi
 
+0. [Eksperimen forward ranking](#0-eksperimen-forward-ranking)
 1. [Screener ini apa, dan bukan apa](#1-screener-ini-apa-dan-bukan-apa)
 2. [Cara buka dan jalanin](#2-cara-buka-dan-jalanin)
 3. [Tur layar: apa saja yang kelihatan](#3-tur-layar-apa-saja-yang-kelihatan)
@@ -26,6 +27,36 @@ Ditulis untuk pemula. Kalau ada istilah yang belum jelas, cek **Kamus Istilah** 
 17. [Batasan yang harus lo tahu](#17-batasan-yang-harus-lo-tahu)
 18. [Troubleshooting](#18-troubleshooting)
 19. [Kamus istilah](#19-kamus-istilah)
+
+---
+
+## 0. Eksperimen forward ranking
+
+Buka `/ranking` untuk eksperimen yang **terpisah** dari kartu sinyal. `PREVIEW
+LIVE` hanya urutan kalau dihitung sekarang; preview bukan bukti. `SNAPSHOT AKTIF`
+adalah catatan immutable yang hanya dapat dibuat Senin 08:00–08:30 UTC setelah
+semua 16 coin lengkap dan timestamp-nya sama.
+
+Aturan beku ada di `SPEC-XSMOM-FORWARD.md`: return 14 hari dari 84 candle 4h
+tertutup, top-4 paper equal-weight, entry di open berikutnya, dan benchmark
+equal-weight 16. Top-4 berarti **PAPER SELECTION**, bukan rekomendasi LONG.
+Breadth `% di atas EMA200` hanya konteks, bukan trade gate. Sinyal 30m/1h tidak
+memfilter, menunda, membobot, atau menutup portfolio ranking.
+
+Satu minggu adalah satu observasi portfolio. Checkpoint 12 minggu hanya audit
+operasional; 26 belum cukup bukti; 52 evaluasi awal; 104 evaluasi lanjut dan
+tetap bukan jaminan. Formation terlewat menjadi `MISSED`, bukan diisi mundur.
+Data 15/16 adalah `INCOMPLETE` dan tidak boleh menjadi snapshot.
+
+Data ada di `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl` (biasanya `/data`).
+Untuk backup/restore: hentikan app, salin/pulihkan file utuh, lalu start lagi;
+jangan merge atau edit baris. Volume `screener_data:/data` harus tetap terpasang
+saat recreate. POST snapshot wajib same-origin dan, jika dikonfigurasi, Bearer
+`RANKING_SNAPSHOT_TOKEN`. Jangan ekspos website tanpa auth/TLS.
+
+Ini paper research, melarang uang nyata dan leverage. Fixed universe punya
+survivorship bias; late sample historis rugi 33,9%; drawdown historis sekitar
+70%; paper fill bukan real fill; past performance bukan jaminan.
 
 ---
 

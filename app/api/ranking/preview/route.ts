@@ -1,0 +1,1 @@
+import {NextResponse} from "next/server";import {preview} from "../../../lib/ranking-lifecycle";export const dynamic="force-dynamic";export async function GET(){try{return NextResponse.json(await preview(),{headers:{"Cache-Control":"no-store"}})}catch(e){return NextResponse.json({mode:"PREVIEW_LIVE",complete:false,error:e instanceof Error?e.message:String(e)},{status:503})}}

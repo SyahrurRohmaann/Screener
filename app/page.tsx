@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import Chart from "./components/Chart";
 import History from "./components/History";
 import RiskCalculator from "./components/RiskCalculator";
@@ -128,9 +129,9 @@ export default function Home() {
 
     <section className="hero">
       <div>
-        <p className="eyebrow">MANUAL TRADING TERMINAL / 30M + 1H</p>
-        <h1>Read the market.<br /><em>Trade with context.</em></h1>
-        <p className="sub">Confluence signals for disciplined decisions — not blind automation.</p>
+        <p className="eyebrow">SINYAL TEKNIKAL / 30M + 1H</p>
+        <h1>Informasi teknikal.<br /><em>Bukan edge tervalidasi.</em></h1>
+        <p className="sub">Kartu confluence berdiri sendiri dan tidak memfilter eksperimen ranking. <Link href="/ranking">Lihat eksperimen ranking terpisah →</Link></p>
       </div>
       <div className="heroStats">
         <div><strong>{setups.toString().padStart(2, "0")}</strong><span>ACTIVE SETUPS</span></div>
@@ -185,6 +186,7 @@ export default function Home() {
           <div className="dots">{[1, 2, 3, 4, 5, 6].map((n) => <i className={n <= r.score ? "on" : ""} key={n} />)}</div>
         </div>
 
+        <p className="cardDisclaimer">INFORMASI SAJA · level berikut adalah kalkulator rencana, bukan rekomendasi entry.</p>
         {r.plan ? <div className="plan">
           <div className="planRow"><span>ENTRY ZONE</span><b>{money(r.plan.entry_low)} — {money(r.plan.entry_high)}</b></div>
           <div className="planRow"><span>INVALIDATION</span><b className="red">{money(r.plan.invalidation)} <i>({num(r.plan.risk_pct)}%)</i></b></div>

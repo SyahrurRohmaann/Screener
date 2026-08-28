@@ -6,6 +6,9 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
 
 ## Features
 
+- Separate `/ranking` preregistered forward experiment over a fixed 16-asset universe
+- Immutable weekly JSONL observations with a strict 16/16 completeness gate
+- Paper top-4 versus equal-weight-16 benchmark; breadth is context only
 - Live 30m + 1h market scan from Binance public Futures API
 - LONG / SHORT / WAIT status with signal state (NEW / VALID / WEAKENING / EXPIRED / INVALIDATED)
 - Entry zone, invalidation level, and 1R/2R reference targets derived from ATR + candle structure
@@ -57,7 +60,15 @@ SCREENER_DATA_DIR=/data      # mount a volume here or history is lost on recreat
 SCREENER_HISTORY_MAX=2000    # records kept
 SCREENER_FEE_PCT=0.1         # round-trip taker fee used for net expectancy
 SCREENER_EVAL_BARS=48        # 30m bars before a setup is marked TIMEOUT
+RANKING_SNAPSHOT_TOKEN=...   # optional bearer plus mandatory same-origin POST
 ```
+
+Ranking snapshots live at `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl`. The
+frozen formation schedule is Monday 08:00 UTC (30-minute window). Keep `/data`
+mounted and back up the whole file; never edit or backfill JSONL lines. Snapshot
+POSTs require a same-origin `Origin`; when `RANKING_SNAPSHOT_TOKEN` is set they
+also require `Authorization: Bearer ...`. Do not expose this site publicly
+without authentication and TLS.
 
 `SCREENER_MIN_SCORE` defaults to `4`. A threshold of `2` matches the old backtest
 candidate but fires on nearly every market while the trend is up, which removes the
@@ -93,6 +104,10 @@ app/api/history/route.ts
 
 app/lib/store.ts      -> append-only JSONL signal log
 app/lib/evaluate.ts   -> outcome replay + statistics
+
+app/api/ranking/{preview,snapshot,history}/route.ts
+app/lib/ranking*.ts, portfolio.ts, forward-stats.ts
+  -> fixed-universe experiment and immutable weekly observations
 
 app/page.tsx
   -> polls /api/market every 60 seconds; mark price uses Binance WebSocket

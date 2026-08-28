@@ -1,0 +1,9 @@
+{
+  "source": "/opt/data/research/screener-edge/portfolio_engine.py accounting conventions",
+  "tolerance": 1e-9,
+  "weeklyLegReturns": [0.1, 0.2, -0.1, 0.0],
+  "weeklyPortfolioReturn": 0.05,
+  "compoundedEquityAfterPlus10Minus10": 99.0,
+  "oneReplacementTurnover": 0.5,
+  "positiveFundingLongReturnAt110MarkFrom100Entry": -0.011
+}
