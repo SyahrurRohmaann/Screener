@@ -29,6 +29,23 @@ export const num = (n?: number | null, d = 2) =>
 export const age = (m?: number) =>
   m == null ? "—" : m < 60 ? `${m}m lalu` : `${Math.floor(m / 60)}j ${m % 60}m lalu`;
 
+/**
+ * Entry reference price for a plan. A LONG fills at the top of the zone, a SHORT
+ * at the bottom, so every percentage on screen must be measured from that side —
+ * the same one RiskCalculator uses for position sizing.
+ */
+export function planEntry(row: Row): number | null {
+  if (!row.plan || !row.sig) return null;
+  return row.sig === "LONG" ? row.plan.entry_high : row.plan.entry_low;
+}
+
+/** Distance from entry to a level, in percent of entry. Always non-negative. */
+export function levelPct(row: Row, level?: number | null): number | null {
+  const entry = planEntry(row);
+  if (entry == null || level == null || !Number.isFinite(level) || entry === 0) return null;
+  return Math.abs(level - entry) / entry * 100;
+}
+
 /** Realtime mark price can kill a plan before the next 60s indicator refresh. */
 export function liveStatus(r: Row) {
   if (!r.sig || !r.plan) return r.status ?? "NONE";

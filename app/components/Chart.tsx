@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Bar, Plan, Row } from "../lib/format";
-import { money, num } from "../lib/format";
+import { levelPct, money, num, planEntry } from "../lib/format";
 
 const W = 760, PRICE_H = 260, VOL_H = 60, RSI_H = 70, GAP = 14, PAD_L = 8, PAD_R = 62;
 
@@ -45,11 +45,18 @@ export default function Chart({ row, onClose }: Props) {
     if (!bars?.length) return null;
     const plan = row.plan ?? null;
     const levels = plan ? [plan.entry_low, plan.entry_high, plan.invalidation, plan.tp1, plan.tp2] : [];
-    const highs = bars.map((b) => b.h).concat(levels, row.price || []);
-    const lows = bars.map((b) => b.l).concat(levels, row.price || []);
     const emas = bars.map((b) => b.ema50).filter((x): x is number => x != null);
-    const rawMax = Math.max(...highs, ...emas);
-    const rawMin = Math.min(...lows, ...emas);
+
+    // The candles set the scale. Plan levels only widen it, never shrink it, so a
+    // far-away level cannot flatten the candles into a straight line.
+    const barMax = Math.max(...bars.map((b) => b.h), ...emas);
+    const barMin = Math.min(...bars.map((b) => b.l), ...emas);
+    const barRange = barMax - barMin || barMax * 0.01;
+    // Allow the axis to grow by at most 60% of the candle range in each direction.
+    const roomMax = barMax + barRange * 0.6, roomMin = barMin - barRange * 0.6;
+    const wanted = [...levels, row.price].filter((v) => Number.isFinite(v) && v > 0) as number[];
+    const rawMax = Math.min(Math.max(barMax, ...wanted), roomMax);
+    const rawMin = Math.max(Math.min(barMin, ...wanted), roomMin);
     const pad = (rawMax - rawMin) * 0.06 || rawMax * 0.01;
     const pMax = rawMax + pad, pMin = rawMin - pad;
     const vMax = Math.max(...bars.map((b) => b.v), ...bars.map((b) => b.mavol14 ?? 0));
@@ -62,13 +69,13 @@ export default function Chart({ row, onClose }: Props) {
     const rsiTop = volTop + VOL_H + GAP;
 
     return {
-      plan, bodyW, x, pMin, pMax, vMax, volTop, rsiTop,
+      plan, entry: planEntry(row), bodyW, x, pMin, pMax, vMax, volTop, rsiTop,
       yPrice: (v: number) => scale(v, pMin, pMax, 0, PRICE_H),
       yVol: (v: number) => scale(v, 0, vMax, volTop, VOL_H),
       yRsi: (v: number) => scale(v, 0, 100, rsiTop, RSI_H),
       height: rsiTop + RSI_H + 4,
     };
-  }, [bars, row.plan, row.price]);
+  }, [bars, row]);
 
   const last = bars?.at(-1);
 
@@ -97,17 +104,26 @@ export default function Chart({ row, onClose }: Props) {
             </g>;
           })}
 
-          {view.plan && ([
-            ["entry", view.plan.entry_high, `ENTRY ${money(view.plan.entry_high)}`],
-            ["stop", view.plan.invalidation, `STOP ${money(view.plan.invalidation)}`],
-            ["tp", view.plan.tp1, `TP1 ${money(view.plan.tp1)}`],
-            ["tp", view.plan.tp2, `TP2 ${money(view.plan.tp2)}`],
-          ] as const).map(([kind, value, label], k) => {
-            const y = view.yPrice(value);
-            if (y < 0 || y > PRICE_H) return null;
-            return <g key={`${kind}${k}`}>
-              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} className={`lvl lvl-${kind}`} />
-              <text x={PAD_L + 4} y={y - 4} className={`lvlText lvl-${kind}`}>{label}</text>
+          {view.plan && view.entry != null && ([
+            ["entry", view.entry, "ENTRY", null],
+            ["stop", view.plan.invalidation, "STOP", "−"],
+            ["tp", view.plan.tp1, "TP1", "+"],
+            ["tp", view.plan.tp2, "TP2", "+"],
+          ] as const).map(([kind, value, name, sign], k) => {
+            const distance = sign ? levelPct(row, value) : null;
+            const label = `${name} ${money(value)}${distance == null ? "" : ` (${sign}${num(distance)}%)`}`;
+            const rawY = view.yPrice(value);
+            // Clamp instead of dropping: a hidden STOP line reads as "no stop".
+            const clamped = rawY < 0 || rawY > PRICE_H;
+            const y = Math.min(Math.max(rawY, 7), PRICE_H - 2);
+            return <g key={`${kind}${k}`} className={clamped ? "lvlOff" : undefined}>
+              <line
+                x1={PAD_L} x2={W - PAD_R} y1={y} y2={y}
+                className={`lvl lvl-${kind}${clamped ? " lvlClamped" : ""}`}
+              />
+              <text x={PAD_L + 4} y={y - 4} className={`lvlText lvl-${kind}`}>
+                {clamped ? `${label} ${rawY < 0 ? "↑ di luar layar" : "↓ di luar layar"}` : label}
+              </text>
             </g>;
           })}
 

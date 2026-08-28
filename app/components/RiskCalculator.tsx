@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Row } from "../lib/format";
-import { money, num } from "../lib/format";
+import { levelPct, money, num } from "../lib/format";
 
 type Props = { rows: Row[] };
 
@@ -69,9 +69,9 @@ export default function RiskCalculator({ rows }: Props) {
         <div><span>RISK AMOUNT</span><b className="red">{money(result.riskAmount)}</b></div>
         <div><span>POSITION SIZE</span><b>{num(result.size, result.size < 1 ? 6 : 3)} {selected!.coin}</b></div>
         <div><span>NOTIONAL</span><b>{money(result.notional)}</b></div>
-        <div><span>LOSS @ STOP</span><b className="red">−{money(result.lossAtStop)}</b></div>
-        <div><span>GAIN @ TP1</span><b className="green">+{money(result.gainAtTp1)}</b></div>
-        <div><span>GAIN @ TP2</span><b className="green">+{money(result.gainAtTp2)}</b></div>
+        <div><span>LOSS @ STOP</span><b className="red">−{money(result.lossAtStop)} <i>(−{num(levelPct(selected!, result.stop))}%)</i></b></div>
+        <div><span>GAIN @ TP1</span><b className="green">+{money(result.gainAtTp1)} <i>(+{num(levelPct(selected!, selected!.plan!.tp1))}%)</i></b></div>
+        <div><span>GAIN @ TP2</span><b className="green">+{money(result.gainAtTp2)} <i>(+{num(levelPct(selected!, selected!.plan!.tp2))}%)</i></b></div>
       </div> : <p className="calcEmpty">Masukkan equity dan risk yang valid.</p>}
 
       {result && <p className="calcNote">

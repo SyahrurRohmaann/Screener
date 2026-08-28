@@ -7,9 +7,11 @@ import History from "./History";
 import RiskCalculator from "./RiskCalculator";
 import AccountPanel from "./auth/AccountPanel";
 import type { Row } from "../lib/format";
-import { age, liveStatus, money, num, pct } from "../lib/format";
+import { age, levelPct, liveStatus, money, num, pct, planEntry } from "../lib/format";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
+// Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
+const FEE_ROUNDTRIP = 0.1;
 const demo: Row[] = COINS.slice(0, 3).map((coin) => ({
   coin, price: 0, score: 0, rsi: 50, trend_1h: "BULL", status: "NONE",
 }));
@@ -191,10 +193,27 @@ export default function Dashboard() {
 
         <p className="cardDisclaimer">INFORMASI SAJA · level berikut adalah kalkulator rencana, bukan rekomendasi entry.</p>
         {r.plan ? <div className="plan">
-          <div className="planRow"><span>ENTRY ZONE</span><b>{money(r.plan.entry_low)} — {money(r.plan.entry_high)}</b></div>
-          <div className="planRow"><span>INVALIDATION</span><b className="red">{money(r.plan.invalidation)} <i>({num(r.plan.risk_pct)}%)</i></b></div>
-          <div className="planRow"><span>TP1 · 1R</span><b className="green">{money(r.plan.tp1)}</b></div>
-          <div className="planRow"><span>TP2 · 2R</span><b className="green">{money(r.plan.tp2)}</b></div>
+          <div className="planRow">
+            <span>ENTRY ZONE</span>
+            <b>{money(r.plan.entry_low)} — {money(r.plan.entry_high)}</b>
+          </div>
+          <div className="planRow">
+            <span>INVALIDATION</span>
+            <b className="red">{money(r.plan.invalidation)} <i>(−{num(levelPct(r, r.plan.invalidation))}%)</i></b>
+          </div>
+          <div className="planRow">
+            <span>TP1 · 1R</span>
+            <b className="green">{money(r.plan.tp1)} <i>(+{num(levelPct(r, r.plan.tp1))}%)</i></b>
+          </div>
+          <div className="planRow">
+            <span>TP2 · 2R</span>
+            <b className="green">{money(r.plan.tp2)} <i>(+{num(levelPct(r, r.plan.tp2))}%)</i></b>
+          </div>
+          <p className="planNote">
+            Persen dihitung dari {r.sig === "LONG" ? "batas atas" : "batas bawah"} entry zone
+            ({money(planEntry(r))}), sisi yang benar-benar kena buat {r.sig}. Belum termasuk
+            fee {FEE_ROUNDTRIP}% bolak-balik, slippage, dan funding.
+          </p>
         </div> : <div className="plan empty">Belum ada rencana — tunggu candle 30m yang memenuhi skor.</div>}
 
         {r.reasons?.length ? <ul className="reasons">
