@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { BINANCE } from "../../lib/indicators";
+import { guard } from "../../lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,6 +17,9 @@ type Premium = { symbol: string; markPrice: string; time: number };
  * how many coins are tracked.
  */
 export async function GET() {
+  const denied = await guard();
+  if (denied) return denied;
+
   try {
     const response = await fetch(`${BINANCE}/fapi/v1/premiumIndex`, {
       cache: "no-store",

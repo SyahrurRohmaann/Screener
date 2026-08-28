@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { guard } from "../../lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +25,9 @@ async function context(coin: string) {
 }
 
 export async function GET() {
+  const denied = await guard();
+  if (denied) return denied;
+
   const values = await Promise.all(COINS.map(context));
   return NextResponse.json(Object.fromEntries(values.map(x => [x.coin, x])));
 }

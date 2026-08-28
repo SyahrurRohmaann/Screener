@@ -1,0 +1,13 @@
+/* account controls (used on both pages) */
+.accountPanel{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px;margin:14px 0 0}
+.accountToggle{background:transparent;border:1px solid var(--line);color:var(--muted);padding:8px 12px;font:9px 'DM Mono';letter-spacing:1.2px;border-radius:8px;cursor:pointer}
+.accountToggle:hover{color:var(--fg);border-color:#7132f5}
+.accountForm{flex:1 1 320px;max-width:390px;border:1px solid var(--line);background:#0d1016;padding:20px;display:grid;gap:9px}
+.accountForm label{font:9px 'DM Mono';letter-spacing:1.2px;color:var(--muted)}
+.accountForm input{background:#0a0d12;border:1px solid var(--line);color:var(--fg);padding:12px;font:12px 'DM Mono';border-radius:8px}
+.accountForm input:focus{outline:2px solid #7132f5;outline-offset:1px}
+.accountForm button[type=submit]{margin-top:12px;background:#7132f5;border:1px solid #7132f5;color:#fff;padding:13px;font:11px 'DM Mono';letter-spacing:1.2px;border-radius:10px;cursor:pointer}
+.accountForm button:disabled{opacity:.4;cursor:not-allowed}
+.accountForm small{font:10px 'DM Mono';color:var(--muted);line-height:1.7}
+.accountForm small[role=alert]{color:var(--red)}
+@media(max-width:520px){.accountForm{padding:15px}}

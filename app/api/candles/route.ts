@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { atr, candles, ema, rsi, sma } from "../../lib/indicators";
+import { guard } from "../../lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -8,6 +9,9 @@ const MAX_BARS = 120;
 
 /** GET /api/candles?coin=BTC — closed 30m candles plus overlays for the chart. */
 export async function GET(request: Request) {
+  const denied = await guard();
+  if (denied) return denied;
+
   const coin = (new URL(request.url).searchParams.get("coin") ?? "BTC").toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!coin) return NextResponse.json({ error: "coin required" }, { status: 400 });
 

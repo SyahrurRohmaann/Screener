@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { evaluate, groupBy, summarize } from "../../lib/evaluate";
 import { readHistory } from "../../lib/store";
+import { guard } from "../../lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /** GET /api/history — logged signals replayed against closed candles. */
 export async function GET() {
+  const denied = await guard();
+  if (denied) return denied;
+
   const records = await readHistory();
   if (!records.length) {
     return NextResponse.json({

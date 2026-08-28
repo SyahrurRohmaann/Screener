@@ -61,7 +61,30 @@ SCREENER_HISTORY_MAX=2000    # records kept
 SCREENER_FEE_PCT=0.1         # round-trip taker fee used for net expectancy
 SCREENER_EVAL_BARS=48        # 30m bars before a setup is marked TIMEOUT
 RANKING_SNAPSHOT_TOKEN=...   # optional bearer plus mandatory same-origin POST
+SCREENER_COOKIE_SECURE=1     # set ONLY once the site is served over HTTPS
 ```
+
+## Login and sessions
+
+Every page and API route requires a session. The first run seeds the initial password
+`098123plm` into `${SCREENER_DATA_DIR}/auth.json` as a scrypt hash with a random 32-byte
+salt and file mode `600`; the plaintext is never written to disk or the repository. Change
+it from the `AKUN` panel inside the site — changing it rotates the salt, bumps
+`passwordVersion`, and signs out every other device while keeping the current browser in.
+
+Sessions are opaque 32-byte ids in an `HttpOnly`, `SameSite=Lax` cookie. The idle timeout
+is two hours and slides forward on each request, so an actively used tab stays signed in
+while an untouched one dies. Ten failed logins within 15 minutes lock the login for the
+rest of that window. Delete `auth.json` to reset back to the seeded initial password.
+
+Serve the site over TLS and set `SCREENER_COOKIE_SECURE=1`. Set it in the Compose service's
+`environment:` block (a container does not read the repo's `.env`), or in `.env.local` when
+running `npm run start` directly on the host. That flag is deliberately not
+tied to `NODE_ENV`: a production build behind plain HTTP would set a `Secure` cookie the
+browser never returns, so login would loop forever. With the flag on, the session cookie is
+marked `Secure` and an HSTS header is sent. Terminate TLS in front of the container (for
+example Caddy or nginx on 443 proxying to `8643`) and keep the plain HTTP port closed to
+the internet.
 
 Ranking snapshots live at `${SCREENER_DATA_DIR}/ranking-snapshots.jsonl`. The
 frozen formation schedule is Monday 08:00 UTC (30-minute window). Keep `/data`

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { atr, candles, ema, getJson, rsi, sma, type Market } from "../../lib/indicators";
 import { recordSignals, type SignalRecord } from "../../lib/store";
+import { guard } from "../../lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -130,6 +131,9 @@ async function analyze(coin: string) {
 }
 
 export async function GET() {
+  const denied = await guard();
+  if (denied) return denied;
+
   const rows = await Promise.all(COINS.map(analyze));
 
   // Log every signal once per closed candle so performance can be audited later.

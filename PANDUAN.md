@@ -8,6 +8,7 @@ Ditulis untuk pemula. Kalau ada istilah yang belum jelas, cek **Kamus Istilah** 
 ## Daftar Isi
 
 0. [Eksperimen forward ranking](#0-eksperimen-forward-ranking)
+0b. [Login, sesi, dan ganti password](#0b-login-sesi-dan-ganti-password)
 1. [Screener ini apa, dan bukan apa](#1-screener-ini-apa-dan-bukan-apa)
 2. [Cara buka dan jalanin](#2-cara-buka-dan-jalanin)
 3. [Tur layar: apa saja yang kelihatan](#3-tur-layar-apa-saja-yang-kelihatan)
@@ -57,6 +58,81 @@ saat recreate. POST snapshot wajib same-origin dan, jika dikonfigurasi, Bearer
 Ini paper research, melarang uang nyata dan leverage. Fixed universe punya
 survivorship bias; late sample historis rugi 33,9%; drawdown historis sekitar
 70%; paper fill bukan real fill; past performance bukan jaminan.
+
+---
+
+## 0b. Login, sesi, dan ganti password
+
+Website ini sekarang **tertutup**. Buka alamatnya, yang muncul pertama adalah
+halaman login. Semua halaman dan semua endpoint API ikut terkunci — tanpa login,
+`/` dan `/ranking` dialihkan ke `/login`, dan setiap `/api/...` menjawab `401`.
+Jadi orang lain tidak bisa menarik data lewat API walau dia tahu URL-nya.
+
+### Password awal
+
+Password awal adalah **`098123plm`**. Saat aplikasi jalan pertama kali, password
+itu langsung diubah menjadi hash `scrypt` dengan salt acak 32 byte dan disimpan
+di `${SCREENER_DATA_DIR}/auth.json` dengan izin file `600`. Password aslinya
+tidak pernah ditulis ke disk maupun ke repo.
+
+Contoh isi `auth.json` (nilai dipotong):
+
+```json
+{"salt":"9f3c…","hash":"2b81…","passwordVersion":1,"sessions":[],"failures":[]}
+```
+
+Kalau lo lupa password: hentikan app, hapus `auth.json`, start lagi. Password
+kembali ke `098123plm` dan semua sesi hilang. Snapshot ranking tidak terpengaruh
+karena file-nya berbeda.
+
+### Sesi mati setelah 2 jam idle
+
+Setelah login, browser dapat cookie `screener_session` berisi id acak 32 byte.
+Cookie-nya `HttpOnly` (JavaScript halaman tidak bisa membacanya) dan
+`SameSite=Lax` (situs lain tidak bisa memakainya diam-diam).
+
+Timeout-nya **idle 2 jam**, dan hitungannya digeser tiap ada aktivitas:
+
+- buka jam 09:00, klik-klik sampai 11:30, lalu diam → sesi mati sekitar 13:30;
+- buka jam 09:00, langsung tinggal → sesi mati jam 11:00;
+- tab dibiarkan terbuka tanpa aktivitas tetap dihitung idle.
+
+Kalau sudah kedaluwarsa, halaman balik ke login dan API menjawab `401`. Tinggal
+login ulang.
+
+Salah password 10 kali dalam 15 menit membuat login **terkunci** sampai jendela
+15 menit itu lewat, walau setelahnya lo masukkan password yang benar.
+
+### Ganti password dari dalam web
+
+Di kanan atas halaman utama dan `/ranking` ada tombol `AKUN` dan `KELUAR`.
+Klik `AKUN`, lalu isi tiga kolom: password sekarang, password baru (minimal 8
+karakter), dan ulangi password baru. Tekan `GANTI PASSWORD`.
+
+Yang terjadi setelah berhasil:
+
+- salt baru dibuat dan hash dihitung ulang, `passwordVersion` naik;
+- **semua perangkat lain otomatis keluar**, browser yang lo pakai tetap masuk;
+- password lama langsung ditolak.
+
+Kalau password sekarang salah, jawabannya `Password sekarang salah.` dan tidak
+ada yang berubah. Kalau password baru di bawah 8 karakter, juga ditolak.
+
+### TLS: wajib kalau diakses dari luar
+
+Password dikirim dari browser ke server saat login. Tanpa HTTPS, kiriman itu
+polos di jaringan. Jadi:
+
+1. pasang TLS di depan container, misalnya Caddy atau nginx di port 443 yang
+   meneruskan ke `8643`;
+2. baru setelah HTTPS jalan, set `SCREENER_COOKIE_SECURE=1`.
+
+Urutannya penting. Flag itu sengaja tidak diikat ke `NODE_ENV`: kalau cookie
+ditandai `Secure` padahal situsnya masih HTTP biasa, browser tidak akan pernah
+mengirim cookie balik dan login akan muter terus tanpa pesan error yang jelas.
+
+Dengan flag menyala, cookie ditandai `Secure` dan header HSTS dikirim. Selama
+belum ada TLS, biarkan flag mati dan jangan buka portnya ke internet.
 
 ---
 
@@ -126,6 +202,9 @@ Di `~/ai-stack/docker-compose.yaml`:
       SCREENER_COINS: BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT
       SCREENER_MIN_SCORE: "4"
       SCREENER_FEE_PCT: "0.1"
+      RANKING_SNAPSHOT_TOKEN: "isi-token-acak-panjang"
+      # Nyalakan HANYA setelah TLS jalan (lihat bagian 0b):
+      # SCREENER_COOKIE_SECURE: "1"
     networks:
       - ai-network
 
@@ -151,6 +230,51 @@ screener_dashboard   Up   0.0.0.0:8643->3000/tcp
 
 > **Penting:** mapping-nya `8643:3000`, bukan `8643:8643`. Next.js di dalam
 > container listen di port 3000. Port 8642 milik Hermes Gateway — jangan disentuh.
+
+### TLS di depan container
+
+Sertifikat tidak dipasang di dalam Next.js; taruh reverse proxy di depannya. Contoh
+Caddy (`/etc/caddy/Caddyfile`) — Caddy mengurus sertifikat Let's Encrypt sendiri:
+
+```text
+screener.domain-lo.com {
+    reverse_proxy 127.0.0.1:8643
+}
+```
+
+Setelah `https://` benar-benar jalan, baru nyalakan `SCREENER_COOKIE_SECURE: "1"`.
+
+**Di mana flag ini ditulis?** Kalau deploy pakai Docker Compose (cara utama lo),
+tulis di blok `environment:` service `screener-dashboard` di
+`~/ai-stack/docker-compose.yaml` — bukan di `.env`. Container tidak membaca `.env`
+repo, dan `.env` juga masuk `.gitignore` sehingga tidak ikut ke image. Uncomment
+baris `SCREENER_COOKIE_SECURE: "1"` di contoh compose di atas, lalu:
+
+```bash
+cd ~/ai-stack
+docker compose up -d --force-recreate screener-dashboard
+docker compose exec screener-dashboard env | grep SCREENER_COOKIE_SECURE
+```
+
+Alternatif kalau lo jalanin `npm run start` langsung di host tanpa Docker: bikin
+`.env.local` di folder repo berisi satu baris `SCREENER_COOKIE_SECURE=1` (Next.js
+membacanya otomatis saat start), atau export di shell sebelum start. Jangan pakai
+nama `.env` biasa untuk ini — pakai `.env.local` supaya konsisten dengan
+`.gitignore` yang sudah ada.
+
+Verifikasi:
+
+```bash
+curl -sI https://screener.domain-lo.com/login | grep -i strict-transport
+curl -si https://screener.domain-lo.com/api/auth/login -X POST \
+  -H "Origin: https://screener.domain-lo.com" -H 'Content-Type: application/json' \
+  -d '{"password":"098123plm"}' | grep -i set-cookie
+```
+
+Yang benar: header `Strict-Transport-Security` muncul, dan cookie mengandung
+`Secure; HttpOnly; SameSite=Lax`. Kalau login jadi muter tanpa pesan, hampir pasti
+flag `SCREENER_COOKIE_SECURE` menyala sementara aksesnya masih lewat HTTP biasa.
+Setelah TLS aktif, jangan biarkan port `8643` terbuka ke internet — cukup proxy-nya.
 
 ### Jalanin lokal buat ngoprek
 
@@ -1137,6 +1261,17 @@ Ini bukan opsional kalau lo mau panel ini berguna.
 | `SCREENER_HISTORY_MAX` | `2000` | Jumlah record maksimal yang dibaca |
 | `SCREENER_FEE_PCT` | `0.1` | Fee taker bolak-balik untuk hitung expectancy net |
 | `SCREENER_EVAL_BARS` | `48` | Batas candle 30m sebelum sinyal dianggap `TIMEOUT` (48 = 24 jam) |
+
+### Login & TLS
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `SCREENER_COOKIE_SECURE` | mati | Set `1` **hanya setelah** situs jalan di HTTPS. Cookie ditandai `Secure` dan HSTS dikirim. Kalau dinyalakan di HTTP biasa, login muter terus. |
+| `RANKING_SNAPSHOT_TOKEN` | kosong | Wajib diisi agar POST snapshot bisa jalan; POST tetap harus same-origin dan sudah login. |
+
+Password tidak pakai environment variable. Password awal `098123plm` di-seed jadi
+hash `scrypt` di `${SCREENER_DATA_DIR}/auth.json` saat run pertama, lalu diganti
+dari tombol `AKUN` di dalam web. Lupa password: hapus `auth.json`, start ulang.
 
 ### Contoh konfigurasi
 
