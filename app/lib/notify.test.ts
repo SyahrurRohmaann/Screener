@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MAX_INBOX, MAX_SEEN, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
-  newSignals, notifiable, signalKey, summarize, trimSeen,
+  MAX_INBOX, MAX_SEEN, alertTransitions, defaultAlertPrefs, inboxUnread,
+  markInboxRead, mergeInbox, mergeInboxBaseline, newSignals, notifiable,
+  signalKey, summarize, trimSeen,
 } from "./notify";
 import type { Row } from "./format";
 
@@ -115,4 +116,53 @@ test("baseline merge marks only baseline additions read, preserving older unread
   assert.equal(merged.find((x) => x.key === "SOL-500")?.read, false);
   assert.equal(merged.find((x) => x.key === "ETH-1000")?.read, true);
   assert.equal(inboxUnread(merged), 1);
+});
+
+test("status alerts fire once when price crosses entry, TP1, TP2, or stop", () => {
+  const long = row({ sig: "LONG", price: 99.5, plan: {
+    entry_low: 99, entry_high: 100, invalidation: 97,
+    risk_pct: 3, tp1: 102, tp2: 104, rr1: 1, rr2: 2,
+  } });
+  const key = signalKey(long);
+  const prefs = { ...defaultAlertPrefs, entry: true, invalidated: true, tp1: true, tp2: true, timeout: false };
+
+  const entry = alertTransitions([long], new Map([[key, "WAITING"]]), prefs);
+  assert.deepEqual(entry.events.map((e) => e.kind), ["ENTRY"]);
+  assert.equal(entry.states.get(key), "ENTRY");
+
+  const firstTp = alertTransitions([{ ...long, price: 102 }], entry.states, prefs);
+  assert.deepEqual(firstTp.events.map((e) => e.kind), ["TP1"]);
+
+  const secondTp = alertTransitions([{ ...long, price: 104 }], firstTp.states, prefs);
+  assert.deepEqual(secondTp.events.map((e) => e.kind), ["TP2"]);
+
+  const stop = alertTransitions([{ ...long, price: 97 }], entry.states, prefs);
+  assert.deepEqual(stop.events.map((e) => e.kind), ["INVALIDATED"]);
+});
+
+test("status alerts understand SHORT direction and never repeat unchanged state", () => {
+  const short = row({ sig: "SHORT", price: 100 });
+  const key = signalKey(short);
+  const prefs = { ...defaultAlertPrefs, entry: true, invalidated: true, tp1: true, tp2: true };
+  const initial = alertTransitions([short], new Map([[key, "WAITING"]]), prefs);
+  assert.deepEqual(initial.events.map((e) => e.kind), ["ENTRY"]);
+  const same = alertTransitions([short], initial.states, prefs);
+  assert.deepEqual(same.events, []);
+  const tp1 = alertTransitions([{ ...short, price: 97 }], same.states, prefs);
+  assert.deepEqual(tp1.events.map((e) => e.kind), ["TP1"]);
+  const stop = alertTransitions([{ ...short, price: 101 }], initial.states, prefs);
+  assert.deepEqual(stop.events.map((e) => e.kind), ["INVALIDATED"]);
+});
+
+test("disabled alert kinds still advance state so enabling later does not replay history", () => {
+  const long = row({ sig: "LONG", price: 102, plan: {
+    entry_low: 99, entry_high: 100, invalidation: 97,
+    risk_pct: 3, tp1: 102, tp2: 104, rr1: 1, rr2: 2,
+  } });
+  const key = signalKey(long);
+  const off = alertTransitions([long], new Map([[key, "WAITING"]]), { ...defaultAlertPrefs, entry: false, tp1: false });
+  assert.deepEqual(off.events, []);
+  assert.equal(off.states.get(key), "TP1");
+  const enabled = alertTransitions([long], off.states, { ...defaultAlertPrefs, tp1: true });
+  assert.deepEqual(enabled.events, []);
 });

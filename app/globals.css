@@ -53,3 +53,5 @@
 .inboxEmpty{margin:0;padding:28px 18px;text-align:center;font:10px 'DM Mono';color:var(--muted)}
 .inboxNote{margin:0;padding:9px 13px;border-top:1px solid var(--line);font:8px 'DM Mono';line-height:1.5;color:var(--muted)}
 @media(max-width:600px){.signalInbox{top:60px;right:8px;width:calc(100vw - 16px);max-height:calc(100vh - 72px)}.inboxMeta{display:none}}
+.alertSettings{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-7px 0 14px;padding:10px 14px;background:#0d1117;border:1px solid var(--line);border-radius:9px}
+.alertSettings>b{font:9px 'DM Mono';letter-spacing:.08em;color:#cbd2dc}.alertSettings label{font:9px 'DM Mono';color:var(--muted);cursor:pointer}.alertSettings input{accent-color:#65a9ff;vertical-align:middle}.alertSettings small{flex-basis:100%;font:8px 'DM Mono';line-height:1.5;color:var(--muted)}

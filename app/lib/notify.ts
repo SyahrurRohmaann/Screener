@@ -94,3 +94,53 @@ export function mergeInboxBaseline(current: InboxItem[], baseline: Row[]): Inbox
   return mergeInbox(current, baseline).map((item) =>
     existing.has(item.key) ? item : { ...item, read: true });
 }
+
+export type AlertKind = "ENTRY" | "INVALIDATED" | "TP1" | "TP2" | "TIMEOUT";
+export type AlertState = "WAITING" | AlertKind;
+export type AlertPrefs = {
+  entry: boolean; invalidated: boolean; tp1: boolean; tp2: boolean; timeout: boolean;
+};
+export const defaultAlertPrefs: AlertPrefs = {
+  entry: true, invalidated: true, tp1: true, tp2: true, timeout: false,
+};
+export type StatusAlert = { key: string; coin: string; sig: "LONG" | "SHORT"; kind: AlertKind; text: string };
+
+function alertState(r: Row, now = Date.now()): AlertState {
+  if (!r.sig || !r.plan) return "WAITING";
+  const p = r.price, plan = r.plan, long = r.sig === "LONG";
+  if (long ? p <= plan.invalidation : p >= plan.invalidation) return "INVALIDATED";
+  if (long ? p >= plan.tp2 : p <= plan.tp2) return "TP2";
+  if (long ? p >= plan.tp1 : p <= plan.tp1) return "TP1";
+  if (p >= plan.entry_low && p <= plan.entry_high) return "ENTRY";
+  if (r.signal_closed_at && now - r.signal_closed_at >= 48 * 30 * 60_000) return "TIMEOUT";
+  return "WAITING";
+}
+
+const preferenceFor = (state: AlertState): keyof AlertPrefs | null =>
+  state === "ENTRY" ? "entry" : state === "INVALIDATED" ? "invalidated"
+  : state === "TP1" ? "tp1" : state === "TP2" ? "tp2"
+  : state === "TIMEOUT" ? "timeout" : null;
+
+const statusText = (r: Row, state: AlertState) =>
+  `${r.coin} ${r.sig} · ${state === "ENTRY" ? "harga masuk zona entry"
+    : state === "INVALIDATED" ? "stop/invalidation terlewati"
+    : state === "TP1" ? "TP1 tersentuh" : state === "TP2" ? "TP2 tersentuh"
+    : "setup timeout"}`;
+
+/** Advance state even for disabled kinds, so enabling later never replays history. */
+export function alertTransitions(
+  rows: Row[], previous: ReadonlyMap<string, AlertState>, prefs: AlertPrefs, now = Date.now(),
+): { states: Map<string, AlertState>; events: StatusAlert[] } {
+  const states = new Map(previous);
+  const events: StatusAlert[] = [];
+  for (const r of notifiable(rows)) {
+    const key = signalKey(r);
+    const next = alertState(r, now);
+    const before = previous.get(key) ?? next; // first observation is baseline
+    states.set(key, next);
+    if (next === before || next === "WAITING") continue;
+    const pref = preferenceFor(next);
+    if (pref && prefs[pref]) events.push({ key, coin: r.coin, sig: r.sig!, kind: next, text: statusText(r, next) });
+  }
+  return { states, events };
+}

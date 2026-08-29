@@ -527,6 +527,13 @@ Ini belum Web Push 24/7. Kalau tab mati total, browser tidak menjalankan polling
 itu nanti perlu scheduler server + service worker/VAPID, bukan sekadar izin
 notifikasi browser.
 
+Tombol `⚙ ALERT STATUS` mengatur event lanjutan per sinyal: masuk zona entry,
+invalid/stop, TP1, TP2, dan timeout 24 jam. Empat event pertama aktif secara
+default; timeout default mati agar tidak berisik. State terakhir disimpan lokal,
+jadi event yang sama tidak diulang setelah refresh atau saat opsi baru diaktifkan.
+Alert ini mengikuti mark price realtime selama halaman aktif; ia informasi status,
+bukan bukti fill atau eksekusi order.
+
 ### Indikator sumber harga
 
 Di header dan di bawah tiap harga ada label sumber feed:

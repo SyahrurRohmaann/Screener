@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { Row } from "../lib/format";
 import {
-  type InboxItem, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
+  type AlertPrefs, type AlertState, type InboxItem, alertTransitions,
+  defaultAlertPrefs, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
   newSignals, notifiable, signalKey, summarize, trimSeen,
 } from "../lib/notify";
 
 const SEEN_STORE = "screener_seen_signals";
 const INBOX_STORE = "screener_signal_inbox_v1";
 const PREF = "screener_notify_on";
+const ALERT_PREFS = "screener_status_alert_prefs_v1";
+const ALERT_STATES = "screener_status_alert_states_v1";
 
 type Toast = { key: string; text: string; sig: "LONG" | "SHORT" };
 
@@ -27,11 +30,14 @@ export default function SignalAlerts({
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [alertPrefs, setAlertPrefs] = useState<AlertPrefs>(defaultAlertPrefs);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const seen = useRef<Set<string>>(new Set());
   const primed = useRef(false);
   const hydrated = useRef(false);
+  const statusStates = useRef<Map<string, AlertState>>(new Map());
 
   useEffect(() => {
     try {
@@ -39,6 +45,10 @@ export default function SignalAlerts({
       if (storedSeen) seen.current = new Set(JSON.parse(storedSeen) as string[]);
       const storedInbox = localStorage.getItem(INBOX_STORE);
       if (storedInbox) setInbox(JSON.parse(storedInbox) as InboxItem[]);
+      const storedPrefs = localStorage.getItem(ALERT_PREFS);
+      if (storedPrefs) setAlertPrefs({ ...defaultAlertPrefs, ...JSON.parse(storedPrefs) });
+      const storedStates = localStorage.getItem(ALERT_STATES);
+      if (storedStates) statusStates.current = new Map(JSON.parse(storedStates));
       setEnabled(localStorage.getItem(PREF) === "1");
     } catch { /* private mode: fall back to in-memory only */ }
     setPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -88,6 +98,25 @@ export default function SignalAlerts({
   }, [rows, enabled]);
 
   useEffect(() => {
+    if (!hydrated.current) return;
+    const transition = alertTransitions(rows, statusStates.current, alertPrefs);
+    statusStates.current = transition.states;
+    try {
+      localStorage.setItem(ALERT_STATES, JSON.stringify(Array.from(transition.states).slice(-400)));
+      localStorage.setItem(ALERT_PREFS, JSON.stringify(alertPrefs));
+    } catch {}
+    if (!transition.events.length) return;
+    setToasts((cur) => [...transition.events.map((event) => ({
+      key: `${event.key}-${event.kind}`, text: event.text, sig: event.sig,
+    })), ...cur].slice(0, 4));
+    if (enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
+      for (const event of transition.events) {
+        try { new Notification(`Update ${event.coin}: ${event.kind}`, { body: event.text, tag: `${event.key}-${event.kind}` }); } catch {}
+      }
+    }
+  }, [rows, enabled, alertPrefs]);
+
+  useEffect(() => {
     if (!toasts.length) return;
     const timer = setTimeout(() => setToasts((cur) => cur.slice(0, -1)), 12_000);
     return () => clearTimeout(timer);
@@ -130,12 +159,25 @@ export default function SignalAlerts({
       <button className={`inboxToggle ${inboxOpen ? "notifOn" : ""}`} onClick={() => setInboxOpen((v) => !v)}>
         ☰ INBOX {unread > 0 && <i>{unread > 99 ? "99+" : unread}</i>}
       </button>
+      <button className={settingsOpen ? "notifOn" : ""} onClick={() => setSettingsOpen((v) => !v)}>⚙ ALERT STATUS</button>
       <small>
         {permission === "denied"
           ? "Notifikasi browser diblokir. Inbox sinyal dan kartu peringatan tetap bekerja."
           : "Inbox menyimpan 100 sinyal terbaru di browser ini. Sinyal baru ditandai belum dibaca."}
       </small>
     </div>
+
+    {settingsOpen && <div className="alertSettings">
+      <b>UPDATE STATUS YANG DINOTIFIKASIKAN</b>
+      {([
+        ["entry", "MASUK ZONA ENTRY"], ["invalidated", "INVALID / STOP"],
+        ["tp1", "TP1 TERSENTUH"], ["tp2", "TP2 TERSENTUH"], ["timeout", "TIMEOUT 24 JAM"],
+      ] as [keyof AlertPrefs, string][]).map(([key, text]) => (
+        <label key={key}><input type="checkbox" checked={alertPrefs[key]}
+          onChange={(e) => setAlertPrefs((cur) => ({ ...cur, [key]: e.target.checked }))} /> {text}</label>
+      ))}
+      <small>Toast tampil selama halaman aktif. Notifikasi OS mengikuti tombol NOTIF AKTIF. Event yang sama tidak diulang.</small>
+    </div>}
 
     {inboxOpen && <aside className="signalInbox" aria-label="Inbox sinyal">
       <div className="inboxHead">
