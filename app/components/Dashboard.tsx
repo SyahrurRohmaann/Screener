@@ -8,7 +8,7 @@ import RiskCalculator from "./RiskCalculator";
 import AccountPanel from "./auth/AccountPanel";
 import SignalAlerts from "./SignalAlerts";
 import type { Row } from "../lib/format";
-import { age, levelPct, liveStatus, money, num, pct, planEntry } from "../lib/format";
+import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
@@ -37,6 +37,7 @@ export default function Dashboard() {
   // "WS" once a frame actually arrives; "POLL" while the REST fallback drives prices.
   const [feed, setFeed] = useState<"WS" | "POLL" | "OFF">("OFF");
   const [tick, setTick] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   // /api/market fans out to ~60 Binance calls. At a 30s cadence a slow response
   // could still be in flight when the next tick fires, so requests never overlap.
@@ -120,6 +121,11 @@ export default function Dashboard() {
     };
   }, [load]);
 
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(clock);
+  }, []);
+
   const shown = useMemo(() => rows.filter((r) => {
     if (side !== "ALL" && r.sig !== side) return false;
     if (mode !== "ALL" && r.mode !== mode) return false;
@@ -183,6 +189,7 @@ export default function Dashboard() {
 
     <section className="grid">{shown.length ? shown.map((r) => {
       const state = liveStatus(r);
+      const entry = liveEntrySnapshot(r, r.price, now);
       const dead = state === "EXPIRED" || state === "INVALIDATED";
       return <article className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}`} key={r.coin}>
         <div className="cardHead">
@@ -209,6 +216,22 @@ export default function Dashboard() {
 
         <p className="cardDisclaimer">INFORMASI SAJA · level berikut adalah kalkulator rencana, bukan rekomendasi entry.</p>
         {r.plan ? <div className="plan">
+          {entry && <div className={`entryLive es-${entry.status.toLowerCase().replaceAll(" ", "-")}`}>
+            <div className="entryLiveHead"><span>STATUS ENTRY · REALTIME</span><b>{entry.status}</b></div>
+            <div className="liveDistances">
+              <span>ENTRY <b>{pct(entry.entry_pct)}</b></span>
+              <span>SL <b>{pct(entry.sl_pct)}</b></span>
+              <span>TP1 <b>{pct(entry.tp1_pct)}</b></span>
+              <span>TP2 <b>{pct(entry.tp2_pct)}</b></span>
+            </div>
+            <div className="progressHead"><span>PROGRES ENTRY → TP1</span><b>{num(entry.progress_tp1_pct, 0)}%</b></div>
+            <div className="entryProgress"><i style={{ width: `${Math.min(100, Math.max(0, entry.progress_tp1_pct))}%` }} /></div>
+            <div className="entryClock">
+              <span>UMUR SINYAL <b>{entry.signal_age_min == null ? "—" : age(entry.signal_age_min)}</b></span>
+              <span>CANDLE 30M BERIKUT <b>{Math.floor((entry.next_candle_ms ?? 0) / 60_000).toString().padStart(2, "0")}:{Math.floor(((entry.next_candle_ms ?? 0) % 60_000) / 1000).toString().padStart(2, "0")}</b></span>
+            </div>
+            {entry.status === "TERLAMBAT" && <p>Informasi posisi harga saja; belum ada cutoff chase yang tervalidasi.</p>}
+          </div>}
           <div className="planRow">
             <span>ENTRY ZONE</span>
             <b>{money(r.plan.entry_low)} — {money(r.plan.entry_high)}</b>

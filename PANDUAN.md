@@ -902,6 +902,34 @@ Angka di kartu itu titik awal berpikir, bukan perintah.
 
 ## 7. Status sinyal dan umurnya
 
+### Status entry realtime di kartu
+
+Setiap kartu yang punya rencana sekarang membandingkan **mark price realtime** dengan
+entry zone dan stop. Status ini berbeda dari status umur `NEW/VALID/WEAKENING/EXPIRED`:
+
+| Status entry | LONG | SHORT | Arti |
+|---|---|---|---|
+| `BELUM MASUK ZONA` | harga di bawah `entry_low`, tetapi belum menembus stop | harga di atas `entry_high`, tetapi belum menembus stop | Harga belum mencapai zona dari sisi retrace. |
+| `DALAM ZONA VALID` | `entry_low` sampai `entry_high` | `entry_low` sampai `entry_high` | Mark price sedang di dalam zona rencana. |
+| `TERLAMBAT` | harga sudah di atas `entry_high` | harga sudah di bawah `entry_low` | Harga sudah bergerak ke arah target melewati zona. **Ini informasi geometri harga, bukan cutoff chase empiris.** |
+| `INVALID` | harga ≤ stop | harga ≥ stop | Premis rencana gugur; status umur kartu juga menjadi `INVALIDATED`. |
+
+Panel yang sama menampilkan jarak mark saat ini ke referensi entry, SL, TP1, dan TP2.
+Tanda positif berarti level itu masih berada di arah yang menguntungkan dari mark;
+tanda negatif berarti mark sudah melewatinya. Karena penyebutnya adalah mark saat ini,
+angka ini bergerak setiap tick dan berbeda dari persen level statis yang dihitung dari
+entry di bagian rencana.
+
+`PROGRES ENTRY → TP1` mengukur posisi mark pada garis lurus entry ke TP1: 0% tepat di
+entry dan 100% tepat di TP1. Angka teks sengaja boleh negatif (belum mencapai entry)
+atau lebih dari 100% (sudah melewati TP1), sementara bar visual dibatasi 0–100% agar
+tata letak tetap stabil. Ini indikator posisi, bukan hasil trade atau bukti fill.
+
+`UMUR SINYAL` dihitung tiap detik dari `signal_closed_at`. Countdown `CANDLE 30M
+BERIKUT` memakai batas waktu UTC yang sejajar di menit `:00` dan `:30`; countdown
+bukan berarti sinyal baru pasti muncul saat mencapai nol. Logika lahirnya sinyal tetap
+hanya memakai candle tertutup dan tetap direfresh setiap 30 detik.
+
 Sinyal punya masa berlaku. Setup dari 3 jam lalu bukan setup lagi.
 
 ```text
