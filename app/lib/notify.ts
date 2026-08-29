@@ -45,3 +45,52 @@ export function summarize(r: Row): string {
 export const MAX_SEEN = 400;
 export const trimSeen = (keys: string[]) =>
   keys.length <= MAX_SEEN ? keys : keys.slice(keys.length - MAX_SEEN);
+
+export type InboxItem = {
+  key: string;
+  coin: string;
+  sig: "LONG" | "SHORT";
+  score: number;
+  mode: "TREND" | "COUNTER" | null;
+  signal_closed_at: number;
+  text: string;
+  read: boolean;
+};
+
+export const MAX_INBOX = 100;
+
+/** Merge newly born signals into a bounded, newest-first persistent inbox. */
+export function mergeInbox(current: InboxItem[], fresh: Row[]): InboxItem[] {
+  const byKey = new Map(current.map((item) => [item.key, item]));
+  for (const r of notifiable(fresh)) {
+    const key = signalKey(r);
+    if (byKey.has(key)) continue; // preserve the existing item's read state
+    byKey.set(key, {
+      key,
+      coin: r.coin,
+      sig: r.sig!,
+      score: r.score,
+      mode: r.mode ?? null,
+      signal_closed_at: r.signal_closed_at!,
+      text: summarize(r),
+      read: false,
+    });
+  }
+  return Array.from(byKey.values())
+    .sort((a, b) => b.signal_closed_at - a.signal_closed_at)
+    .slice(0, MAX_INBOX);
+}
+
+/** Mark one item, or every item when key is omitted. Returns a new array. */
+export const markInboxRead = (items: InboxItem[], key?: string): InboxItem[] =>
+  items.map((item) => (!key || item.key === key ? { ...item, read: true } : item));
+
+export const inboxUnread = (items: InboxItem[]) =>
+  items.reduce((count, item) => count + (item.read ? 0 : 1), 0);
+
+/** First-page load: add current signals as read without clearing older unread news. */
+export function mergeInboxBaseline(current: InboxItem[], baseline: Row[]): InboxItem[] {
+  const existing = new Set(current.map((item) => item.key));
+  return mergeInbox(current, baseline).map((item) =>
+    existing.has(item.key) ? item : { ...item, read: true });
+}

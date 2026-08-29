@@ -2,42 +2,53 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Row } from "../lib/format";
-import { newSignals, notifiable, signalKey, summarize, trimSeen } from "../lib/notify";
+import {
+  type InboxItem, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
+  newSignals, notifiable, signalKey, summarize, trimSeen,
+} from "../lib/notify";
 
-const STORE = "screener_seen_signals";
+const SEEN_STORE = "screener_seen_signals";
+const INBOX_STORE = "screener_signal_inbox_v1";
 const PREF = "screener_notify_on";
 
 type Toast = { key: string; text: string; sig: "LONG" | "SHORT" };
 
-/**
- * Announces signals the operator has not seen before.
- *
- * Two deliberate choices:
- *  - The first load after opening the page is a BASELINE, not news. Existing
- *    signals are recorded silently; otherwise every visit would fire a burst of
- *    notifications for setups that may be hours old.
- *  - Seen keys live in localStorage, so a reload does not re-announce. They are
- *    capped so the entry can never grow without bound.
- *
- * Browser notifications only work over HTTPS (or localhost) and only after the
- * user grants permission — the toast is the fallback that always works.
- */
-export default function SignalAlerts({ rows }: { rows: Row[] }) {
+const when = (ts: number) => new Date(ts).toLocaleString("id-ID", {
+  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+});
+
+export default function SignalAlerts({
+  rows, onOpenSignal,
+}: {
+  rows: Row[];
+  onOpenSignal: (coin: string) => void;
+}) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const seen = useRef<Set<string>>(new Set());
   const primed = useRef(false);
+  const hydrated = useRef(false);
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(STORE);
-      if (stored) seen.current = new Set(JSON.parse(stored) as string[]);
+      const storedSeen = localStorage.getItem(SEEN_STORE);
+      if (storedSeen) seen.current = new Set(JSON.parse(storedSeen) as string[]);
+      const storedInbox = localStorage.getItem(INBOX_STORE);
+      if (storedInbox) setInbox(JSON.parse(storedInbox) as InboxItem[]);
       setEnabled(localStorage.getItem(PREF) === "1");
     } catch { /* private mode: fall back to in-memory only */ }
     setPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
+    hydrated.current = true;
   }, []);
+
+  useEffect(() => {
+    if (!hydrated.current) return;
+    try { localStorage.setItem(INBOX_STORE, JSON.stringify(inbox)); } catch {}
+  }, [inbox]);
 
   useEffect(() => {
     const live = notifiable(rows);
@@ -47,12 +58,19 @@ export default function SignalAlerts({ rows }: { rows: Row[] }) {
     const fresh = newSignals(rows, seen.current);
     for (const r of live) seen.current.add(signalKey(r));
     try {
-      localStorage.setItem(STORE, JSON.stringify(trimSeen(Array.from(seen.current))));
+      localStorage.setItem(SEEN_STORE, JSON.stringify(trimSeen(Array.from(seen.current))));
     } catch {}
 
-    if (!primed.current) { primed.current = true; return; }
+    // Existing signals form the baseline: they go into the inbox as read, but do
+    // not impersonate news with a badge/toast every time the page is opened.
+    if (!primed.current) {
+      primed.current = true;
+      setInbox((cur) => mergeInboxBaseline(cur, live));
+      return;
+    }
     if (!fresh.length) return;
 
+    setInbox((cur) => mergeInbox(cur, fresh));
     setToasts((cur) => [
       ...fresh.map((r) => ({ key: signalKey(r), text: summarize(r), sig: r.sig! })),
       ...cur,
@@ -62,9 +80,7 @@ export default function SignalAlerts({ rows }: { rows: Row[] }) {
       for (const r of fresh) {
         try {
           new Notification(`Sinyal baru: ${r.coin} ${r.sig}`, {
-            body: summarize(r),
-            tag: signalKey(r),      // same signal never notifies twice
-            silent: false,
+            body: summarize(r), tag: signalKey(r), silent: false,
           });
         } catch {}
       }
@@ -92,10 +108,17 @@ export default function SignalAlerts({ rows }: { rows: Row[] }) {
     try { localStorage.setItem(PREF, "1"); } catch {}
   };
 
+  const openItem = (item: InboxItem) => {
+    setInbox((cur) => markInboxRead(cur, item.key));
+    setInboxOpen(false);
+    onOpenSignal(item.coin);
+  };
+
   const label =
     permission === "unsupported" ? "NOTIF TIDAK DIDUKUNG"
     : permission === "denied" ? "NOTIF DIBLOKIR BROWSER"
     : enabled ? "🔔 NOTIF AKTIF" : "🔕 NOTIF MATI";
+  const unread = inboxUnread(inbox);
 
   return <>
     <div className="notifBar">
@@ -104,18 +127,40 @@ export default function SignalAlerts({ rows }: { rows: Row[] }) {
         onClick={toggle}
         disabled={permission === "unsupported" || permission === "denied"}
       >{label}</button>
+      <button className={`inboxToggle ${inboxOpen ? "notifOn" : ""}`} onClick={() => setInboxOpen((v) => !v)}>
+        ☰ INBOX {unread > 0 && <i>{unread > 99 ? "99+" : unread}</i>}
+      </button>
       <small>
         {permission === "denied"
-          ? "Izin notifikasi diblokir di setelan browser untuk situs ini. Kartu peringatan di layar tetap muncul."
-          : "Sinyal baru muncul sebagai kartu di layar. Aktifkan untuk notifikasi browser juga, termasuk saat tab tidak aktif."}
+          ? "Notifikasi browser diblokir. Inbox sinyal dan kartu peringatan tetap bekerja."
+          : "Inbox menyimpan 100 sinyal terbaru di browser ini. Sinyal baru ditandai belum dibaca."}
       </small>
     </div>
+
+    {inboxOpen && <aside className="signalInbox" aria-label="Inbox sinyal">
+      <div className="inboxHead">
+        <div><b>INBOX SINYAL</b><span>{unread} belum dibaca · {inbox.length} tersimpan</span></div>
+        <div>
+          {unread > 0 && <button onClick={() => setInbox((cur) => markInboxRead(cur))}>TANDAI SEMUA DIBACA</button>}
+          <button onClick={() => setInboxOpen(false)}>✕</button>
+        </div>
+      </div>
+      {inbox.length === 0
+        ? <p className="inboxEmpty">Belum ada sinyal. Inbox mulai terisi saat setup pertama lahir.</p>
+        : <div className="inboxList">{inbox.map((item) => (
+          <button key={item.key} className={`inboxItem ${item.read ? "" : "unread"} ${item.sig === "LONG" ? "iLong" : "iShort"}`} onClick={() => openItem(item)}>
+            <span className="inboxDot" />
+            <span className="inboxMain"><b>{item.coin} {item.sig}</b><small>{item.text}</small></span>
+            <span className="inboxMeta"><b>SKOR {item.score}</b><small>{when(item.signal_closed_at)}</small></span>
+          </button>
+        ))}</div>}
+      <p className="inboxNote">Disimpan lokal di browser ini, bukan sinkron antarperangkat. Klik item untuk buka chart coin terkait.</p>
+    </aside>}
 
     {toasts.length > 0 && <div className="toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.key} className={`toast ${t.sig === "LONG" ? "tLong" : "tShort"}`}>
-          <b>SINYAL BARU</b>
-          <span>{t.text}</span>
+          <b>SINYAL BARU</b><span>{t.text}</span>
           <button onClick={() => setToasts((cur) => cur.filter((x) => x.key !== t.key))}>✕</button>
         </div>
       ))}

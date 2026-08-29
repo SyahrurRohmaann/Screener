@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MAX_SEEN, newSignals, notifiable, signalKey, summarize, trimSeen } from "./notify";
+import {
+  MAX_INBOX, MAX_SEEN, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
+  newSignals, notifiable, signalKey, summarize, trimSeen,
+} from "./notify";
 import type { Row } from "./format";
 
 const row = (over: Partial<Row> = {}): Row => ({
@@ -60,4 +63,56 @@ test("the seen set is capped and keeps the newest keys", () => {
   assert.equal(kept.length, MAX_SEEN);
   assert.equal(kept.at(-1), `K-${MAX_SEEN + 49}`);
   assert.deepEqual(trimSeen(["a", "b"]), ["a", "b"]);
+});
+
+test("fresh signals become unread inbox items, newest first", () => {
+  const current = [{
+    key: "SOL-500", coin: "SOL", sig: "LONG" as const, score: 5,
+    mode: "TREND" as const, signal_closed_at: 500, text: "old", read: true,
+  }];
+  const fresh = [
+    row({ coin: "ETH", signal_closed_at: 1000 }),
+    row({ coin: "BTC", signal_closed_at: 2000 }),
+  ];
+  const merged = mergeInbox(current, fresh);
+  assert.deepEqual(merged.map((x) => x.key), ["BTC-2000", "ETH-1000", "SOL-500"]);
+  assert.equal(merged[0].read, false);
+  assert.equal(merged[1].text, summarize(fresh[0]));
+  assert.equal(merged[2].read, true);
+});
+
+test("inbox merge dedupes by key and preserves read state", () => {
+  const original = [{
+    key: "ETH-1000", coin: "ETH", sig: "SHORT" as const, score: 4,
+    mode: null, signal_closed_at: 1000, text: "ETH old", read: true,
+  }];
+  const merged = mergeInbox(original, [row()]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].read, true);
+});
+
+test("inbox is capped and drops the oldest records", () => {
+  const fresh = Array.from({ length: MAX_INBOX + 5 }, (_, i) =>
+    row({ coin: `C${i}`, signal_closed_at: i + 1 }));
+  const merged = mergeInbox([], fresh);
+  assert.equal(merged.length, MAX_INBOX);
+  assert.equal(merged[0].signal_closed_at, MAX_INBOX + 5);
+  assert.equal(merged.at(-1)?.signal_closed_at, 6);
+});
+
+test("mark read supports one item and all items without mutation", () => {
+  const inbox = mergeInbox([], [row(), row({ coin: "BTC", signal_closed_at: 2000 })]);
+  const one = markInboxRead(inbox, "ETH-1000");
+  assert.equal(inboxUnread(one), 1);
+  assert.equal(one.find((x) => x.key === "ETH-1000")?.read, true);
+  assert.equal(inboxUnread(markInboxRead(one)), 0);
+  assert.equal(inboxUnread(inbox), 2);
+});
+
+test("baseline merge marks only baseline additions read, preserving older unread items", () => {
+  const oldUnread = mergeInbox([], [row({ coin: "SOL", signal_closed_at: 500 })]);
+  const merged = mergeInboxBaseline(oldUnread, [row()]);
+  assert.equal(merged.find((x) => x.key === "SOL-500")?.read, false);
+  assert.equal(merged.find((x) => x.key === "ETH-1000")?.read, true);
+  assert.equal(inboxUnread(merged), 1);
 });

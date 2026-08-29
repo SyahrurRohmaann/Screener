@@ -506,6 +506,27 @@ dulu paling lama 60 detik, sekarang paling lama 30 detik. Rata-ratanya 15 detik.
 Menurunkan lagi ke 10 detik tidak menambah kecepatan yang berarti tapi melipatgandakan
 request ke Binance (~60 panggilan tiap kali refresh) dan berisiko kena rate limit.
 
+### Inbox dan notifikasi sinyal baru
+
+Bar `NOTIF` di atas dashboard punya dua fungsi yang berbeda:
+
+- `🔔 NOTIF AKTIF` mengirim notifikasi browser untuk sinyal yang lahir setelah
+  halaman dibuka. Browser meminta izin sekali; fitur ini perlu HTTPS.
+- `☰ INBOX` menyimpan maksimal 100 sinyal terbaru **di browser/perangkat itu**.
+  Badge merah adalah jumlah yang belum dibaca. Klik item untuk menandainya dibaca
+  sekaligus membuka chart coin terkait; tombol `TANDAI SEMUA DIBACA` mereset badge.
+
+Load pertama dijadikan baseline: sinyal yang sudah ada masuk inbox sebagai sudah
+dibaca dan tidak memunculkan ledakan notifikasi lama. Identitasnya
+`<coin>-<waktu candle tutup>`, sehingga refresh 30 detik dan reload halaman tidak
+mengumumkan sinyal yang sama berulang kali. Inbox memakai `localStorage`, bukan
+server: ia bertahan setelah reload, tetapi **tidak sinkron antar-browser/perangkat**.
+
+Ini belum Web Push 24/7. Kalau tab mati total, browser tidak menjalankan polling
+30 detik dan tidak ada proses yang bisa mendeteksi sinyal baru. Untuk kebutuhan
+itu nanti perlu scheduler server + service worker/VAPID, bukan sekadar izin
+notifikasi browser.
+
 ### Indikator sumber harga
 
 Di header dan di bawah tiap harga ada label sumber feed:

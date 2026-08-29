@@ -146,7 +146,7 @@ export default function Dashboard() {
     </header>
 
     <AccountPanel />
-    <SignalAlerts rows={rows} />
+    <SignalAlerts rows={rows} onOpenSignal={setChartCoin} />
 
     <section className="hero">
       <div>
