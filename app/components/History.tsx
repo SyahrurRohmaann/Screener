@@ -10,16 +10,21 @@ type Stats = {
   profit_factor: number | null; gross_r: number; net_r: number;
   max_drawdown_r: number | null; fee_r_per_trade: number | null;
 };
-type Bucket = { bucket: string | number; stats: Stats };
+type Bucket = { bucket: string | number; stats: Stats; small_sample?: boolean; warning?: string };
+type Range = "30" | "60" | "90" | "all";
+type EquityPoint = { key: string; at: number; net_r: number; equity_r: number };
+type OutcomeCount = { outcome: string; count: number; pct: number };
+type Holding = { count: number; average_bars: number | null; median_bars: number | null; p90_bars: number | null; average_hours: number | null; distribution: { bucket: string; count: number; pct: number }[] };
 type EvalRow = {
   key: string; coin: string; sig: "LONG" | "SHORT"; score: number;
   mode: string | null; signal_closed_at: number; entry: number; stop: number;
   outcome: string; r_multiple: number | null; net_r: number | null; bars_held: number | null;
 };
 type Payload = {
-  empty: boolean; note?: string; stats: Stats | null;
+  empty: boolean; note?: string; stats: Stats | null; range: Range;
   by_score: Bucket[]; by_side: Bucket[]; by_mode: Bucket[]; by_coin: Bucket[];
-  rows: EvalRow[];
+  by_atr: Bucket[]; by_trend_1h: Bucket[]; equity_curve: EquityPoint[];
+  outcomes: OutcomeCount[]; holding: Holding | null; rows: EvalRow[];
 };
 
 const when = (ts: number) =>
@@ -33,7 +38,7 @@ function StatRow({ label, buckets }: { label: string; buckets: Bucket[] }) {
   return <div className="statBlock">
     <h3>{label}</h3>
     <table className="statTable">
-      <thead><tr><th>{label}</th><th>N</th><th>SELESAI</th><th>WR</th><th>EXP NET</th><th>PF</th><th>NET</th></tr></thead>
+      <thead><tr><th>{label}</th><th>N</th><th>SELESAI</th><th>WR</th><th>EXP NET</th><th>PF</th><th>NET</th><th>SAMPEL</th></tr></thead>
       <tbody>{buckets.map((b) => (
         <tr key={String(b.bucket)}>
           <td><b>{String(b.bucket)}</b></td>
@@ -43,6 +48,9 @@ function StatRow({ label, buckets }: { label: string; buckets: Bucket[] }) {
           <td className={(b.stats.expectancy_net_r ?? 0) > 0 ? "green" : "red"}>{r(b.stats.expectancy_net_r)}</td>
           <td>{b.stats.profit_factor == null ? "—" : num(b.stats.profit_factor)}</td>
           <td className={(b.stats.net_r ?? 0) > 0 ? "green" : "red"}>{r(b.stats.net_r, 1)}</td>
+          <td>{b.stats.resolved < 30
+            ? <strong className="sampleWarn">⚠ KECIL {b.stats.resolved}/30</strong>
+            : <span className="sampleOk">CUKUP</span>}</td>
         </tr>
       ))}</tbody>
     </table>
@@ -53,16 +61,17 @@ export default function History() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [range, setRange] = useState<Range>("30");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/history", { cache: "no-store" });
+      const response = await fetch(`/api/history?range=${range}`, { cache: "no-store" });
       setData(await response.json());
     } catch { /* keep previous view */ } finally { setLoading(false); }
-  }, []);
+  }, [range]);
 
-  useEffect(() => { if (open && !data) load(); }, [open, data, load]);
+  useEffect(() => { if (open) load(); }, [open, load]);
 
   const s = data?.stats;
 
@@ -79,6 +88,12 @@ export default function History() {
     </div>
 
     {open && <>
+      <div className="rangeBtns" aria-label="Rentang history">
+        {(["30", "60", "90", "all"] as Range[]).map((value) =>
+          <button key={value} className={range === value ? "active" : ""} onClick={() => setRange(value)}>
+            {value === "all" ? "SEMUA" : `${value} HARI`}
+          </button>)}
+      </div>
       {!data && loading && <p className="calcEmpty">Mengevaluasi riwayat…</p>}
       {data?.empty && <p className="calcEmpty">{data.note}</p>}
 
@@ -106,6 +121,33 @@ export default function History() {
           {s.resolved < 30 ? ` Sampel baru ${s.resolved} trade selesai; di bawah ~30 trade angka ini belum bisa dipercaya.` : ""}
         </p>
 
+        <div className="statBlock">
+          <h3>EQUITY NET-R · KRONOLOGIS</h3>
+          {data!.equity_curve.length
+            ? <div className="equityChart" role="img" aria-label="Kurva equity net R kronologis">
+                {(() => {
+                  const points = data!.equity_curve;
+                  const values = [0, ...points.map((p) => p.equity_r)];
+                  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
+                  const coords = points.map((p, i) => `${points.length === 1 ? 100 : (i / (points.length - 1)) * 200},${80 - ((p.equity_r - min) / span) * 70}`).join(" ");
+                  return <svg viewBox="0 0 200 90" preserveAspectRatio="none"><line x1="0" y1={80 - ((0 - min) / span) * 70} x2="200" y2={80 - ((0 - min) / span) * 70}/><polyline points={coords}/></svg>;
+                })()}
+                <div><span>AWAL 0R</span><b className={(data!.equity_curve.at(-1)?.equity_r ?? 0) >= 0 ? "green" : "red"}>{r(data!.equity_curve.at(-1)?.equity_r, 1)}</b></div>
+              </div>
+            : <p className="calcEmpty">Belum ada trade selesai dalam rentang ini.</p>}
+        </div>
+
+        <div className="analyticsGrid">
+          <div className="statBlock"><h3>DISTRIBUSI OUTCOME</h3>{data!.outcomes.map((o) => <div className="distRow" key={o.outcome}><b>{o.outcome}</b><span>{o.count} · {num(o.pct, 1)}%</span></div>)}</div>
+          {data!.holding && <div className="statBlock"><h3>WAKTU HOLDING (TRADE SELESAI)</h3>
+            <div className="holdSummary"><span>RATA-RATA <b>{num(data!.holding.average_bars)} bar / {num(data!.holding.average_hours)} jam</b></span><span>MEDIAN <b>{num(data!.holding.median_bars)} bar</b></span><span>P90 <b>{num(data!.holding.p90_bars)} bar</b></span></div>
+            {data!.holding.distribution.map((d) => <div className="distRow" key={d.bucket}><b>{d.bucket} bar</b><span>{d.count} · {num(d.pct, 1)}%</span></div>)}
+          </div>}
+        </div>
+
+        <p className="sampleBanner">⚠ SETIAP BUCKET DI BAWAH 30 TRADE SELESAI ADALAH SAMPEL KECIL — JANGAN ANGGAP POLA SEBAGAI EDGE.</p>
+        <StatRow label="ATR BUCKET" buckets={data!.by_atr} />
+        <StatRow label="TREND 1H" buckets={data!.by_trend_1h} />
         <StatRow label="SCORE" buckets={data!.by_score} />
         <StatRow label="SIDE" buckets={data!.by_side} />
         <StatRow label="MODE" buckets={data!.by_mode} />

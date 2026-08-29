@@ -1428,16 +1428,42 @@ Ini bukan formalitas. Dengan 5 trade, win rate 80% bisa terjadi murni
 karena kebetulan. Kesimpulan dari sampel kecil lebih berbahaya daripada
 tidak ada kesimpulan, karena lo jadi percaya pada pola yang nggak ada.
 
+### Filter waktu dan analitik lanjutan
+
+Tombol `30 HARI`, `60 HARI`, `90 HARI`, dan `SEMUA` membatasi **record sinyal
+tersimpan** berdasarkan waktu candle sinyal. Tidak ada hasil sintetis atau
+backfill yang diciptakan untuk mengisi rentang kosong. Setiap ganti rentang,
+semua ringkasan dan tabel dihitung ulang dari subset yang sama.
+
+Kurva **EQUITY NET-R** mengurutkan trade selesai secara kronologis, lalu
+menjumlahkan `net_r` setelah fee. Distribusi outcome memisahkan TP2, TP1,
+STOP, TIMEOUT, OPEN, dan UNKNOWN. Semua persentase memakai seluruh sinyal
+dalam rentang sebagai penyebut, sehingga distribusinya konsisten dan berjumlah 100%.
+
+Statistik holding hanya memakai trade selesai yang punya `bars_held`:
+
+- rata-rata dan median menunjukkan pusat durasi;
+- P90 menunjukkan durasi yang menaungi 90% trade;
+- bucket `1–3`, `4–8`, `9–24`, `25–48`, dan `>48` bar menunjukkan distribusi;
+- satu bar = 30 menit, sehingga rata-rata jam = rata-rata bar ÷ 2.
+
 ### Breakdown
 
-Empat tabel pecahan:
+Enam tabel pecahan:
 
 | Tabel | Pertanyaan yang dijawab |
 |---|---|
+| **ATR BUCKET** | Volatilitas `<1%`, `1–2%`, atau `≥2%` mana yang efektif? |
+| **TREND 1H** | Kondisi tren 1h tersimpan mana yang mendukung hasil? |
 | **SCORE** | Apakah skor 5 benar-benar lebih baik dari skor 4? |
 | **SIDE** | LONG atau SHORT yang lebih cocok? |
 | **MODE** | Searah tren atau counter-trend? |
 | **COIN** | Coin mana yang cocok, mana yang buang-buang fee? |
+
+Setiap baris bucket selalu membawa status sampel. Di bawah 30 trade selesai,
+label `⚠ KECIL n/30` ditampilkan menonjol. Peringatan ini berlaku per bucket,
+bukan hanya total keseluruhan—total 100 trade tidak membuat bucket ATR berisi
+4 trade menjadi tepercaya.
 
 Tabel SCORE yang paling menarik, karena menguji asumsi dasar sistem ini.
 Kalau ternyata skor 5 hasilnya lebih buruk dari skor 4, artinya pembobotan
