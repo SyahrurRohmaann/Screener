@@ -9,6 +9,7 @@ import AccountPanel from "./auth/AccountPanel";
 import SignalAlerts from "./SignalAlerts";
 import DecisionJournal, { openSignalDecision } from "./DecisionJournal";
 import DataHealth from "./DataHealth";
+import ScaleControl from "./ScaleControl";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
@@ -159,6 +160,7 @@ export default function Dashboard() {
         <span className={`pulse ${feed === "OFF" ? "dead" : ""}`} />
         {feed === "WS" ? "LIVE · WEBSOCKET" : feed === "POLL" ? "LIVE · POLLING 3S" : "MENGHUBUNGKAN…"}
         {tick && <em className="tick">{tick.toLocaleTimeString("id-ID")}</em>}
+        <ScaleControl />
         <button onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
       </div>
     </header>

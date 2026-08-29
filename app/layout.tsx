@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
+import { SCALE_BOOTSTRAP } from "./lib/ui-scale";
 
 export const metadata: Metadata = {
   title: "Screener — Futures Intelligence",
@@ -30,5 +32,12 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="id"><body>{children}</body></html>;
+  return <html lang="id">
+    <head>
+      {/* Applies the stored text size before first paint, so the page does not render
+          at 100% and then visibly jump. localStorage is unreachable on the server. */}
+      <Script id="ui-scale-bootstrap" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: SCALE_BOOTSTRAP }} />
+    </head>
+    <body>{children}</body>
+  </html>;
 }

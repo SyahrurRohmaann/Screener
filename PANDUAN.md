@@ -258,6 +258,54 @@ lo buka chartnya.** Kalau lo pakai sebagai tombol "entry otomatis", lo bakar dui
 
 ## 2. Cara buka dan jalanin
 
+### Pasang di HP sebagai aplikasi (PWA)
+
+Screener sekarang bisa dipasang ke home screen dan dibuka seperti aplikasi biasa —
+tanpa address bar browser.
+
+**Cara pasang (Chrome Android):** buka `https://scansignal.my.id`, ketuk menu ⋮ di
+kanan atas, pilih **"Add to Home screen"** atau **"Install app"**. Ikon diamond hijau
+akan muncul di home screen.
+
+**Yang lo dapat setelah dipasang:**
+
+- Layar penuh tanpa address bar, jadi ruang untuk kartu sinyal lebih lega.
+- Huruf tidak lagi mikro. Sebelum ini halaman di-render selebar ±980px lalu dikecilkan
+  HP; sekarang ada `width=device-width` sehingga lebarnya benar sejak awal.
+- Font dimuat dari server sendiri, bukan dari Google. Jadi saat jaringan jelek huruf
+  tidak berganti-ganti dan tata letak tidak bergeser.
+
+**Yang TIDAK lo dapat — ini penting jangan salah harap:**
+
+- **Notifikasi saat aplikasi tertutup belum ada.** Memasang PWA tidak otomatis memberi
+  notifikasi latar. Itu butuh Web Push yang **belum dikerjakan**. Toast, badge inbox, dan
+  suara alert tetap hanya jalan selama Screener terbuka.
+- **Data tidak tersimpan untuk dibaca offline**, dan itu memang disengaja. Menyajikan
+  harga dari cache di alat keputusan trading berbahaya — lo bisa melihat harga lima
+  menit lalu dan menyangka itu harga sekarang.
+
+### Ukuran huruf: lo yang atur
+
+Di bar atas ada kontrol **`HURUF  A−  93%  A+`**. Tujuh tingkat, dari **85%** sampai
+**160%**, dan pilihan lo tersimpan sehingga tidak perlu diatur lagi tiap buka.
+
+Dua hal yang bikin ini beda dari sekadar memperbesar huruf:
+
+- **Setelan HP lo tetap dihormati.** Ukuran dasarnya `calc(100% * skala)` — `100%` itu
+  ukuran default browser yang sudah mengikuti setelan font Android lo. Kalau dipaku
+  `16px`, setelan HP lo malah diabaikan. Jadi ada dua lapis: setelan Android (semua
+  aplikasi) dan kontrol ini (khusus Screener).
+- **Pinch-zoom tetap hidup.** Banyak PWA mematikannya supaya "terasa native"; di sini
+  sengaja tidak, karena itu justru mencabut kemampuan lo memperbesar.
+
+Di layar HP (≤700px) seluruh tangga ukuran otomatis dinaikkan satu tingkat — teks 8px
+dan 9px yang nyaman di monitor praktis tidak terbaca di HP.
+
+**Satu bagian yang tidak ikut kontrol ini:** teks di dalam chart SVG (label sumbu,
+angka level). Chart memakai `viewBox` sehingga ukurannya mengikuti lebar chart, bukan
+ukuran huruf halaman. Kalau ikut diskalakan, teksnya berubah dua kali dan label saling
+tumpang tindih.
+
 ### Buka di browser
 
 ```text
