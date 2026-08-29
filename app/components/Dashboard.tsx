@@ -7,6 +7,7 @@ import History from "./History";
 import RiskCalculator from "./RiskCalculator";
 import AccountPanel from "./auth/AccountPanel";
 import SignalAlerts from "./SignalAlerts";
+import DecisionJournal, { openSignalDecision } from "./DecisionJournal";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
 
@@ -271,12 +272,19 @@ export default function Dashboard() {
 
         <div className="cardFoot">
           <span>Signal is informational. Validate structure before entry.</span>
+          {r.sig && r.plan && r.signal_closed_at != null && <div className="cardDecisionBtns">
+            <button onClick={() => openSignalDecision(r, "PAPER")}>AMBIL PAPER</button>
+            <button onClick={() => openSignalDecision(r, "WATCH")}>PANTAU</button>
+            <button onClick={() => openSignalDecision(r, "SKIP")}>LEWATI</button>
+          </div>}
           <button className="chartBtn" onClick={() => setChartCoin(r.coin)}>CHART ↗</button>
         </div>
       </article>;
     }) : <p className="emptyState">Tidak ada market yang lolos filter ini.</p>}</section>
 
     <RiskCalculator rows={rows} />
+
+    <DecisionJournal rows={rows} />
 
     <History />
 

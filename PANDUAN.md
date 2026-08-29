@@ -10,6 +10,7 @@ Ditulis untuk pemula. Kalau ada istilah yang belum jelas, cek **Kamus Istilah** 
 0. [Eksperimen forward ranking](#0-eksperimen-forward-ranking)
 0b. [Login, sesi, dan ganti password](#0b-login-sesi-dan-ganti-password)
 0c. [Keamanan: yang wajib lo lakukan](#0c-keamanan-yang-wajib-lo-lakukan)
+0d. [Journal keputusan manual](#0d-journal-keputusan-manual)
 1. [Screener ini apa, dan bukan apa](#1-screener-ini-apa-dan-bukan-apa)
 2. [Cara buka dan jalanin](#2-cara-buka-dan-jalanin)
 3. [Tur layar: apa saja yang kelihatan](#3-tur-layar-apa-saja-yang-kelihatan)
@@ -181,6 +182,34 @@ urutannya, lo terkunci di luar VPS sendiri.
 
 - Satu password untuk satu operator; belum ada multi-user atau 2FA.
 - Rate limit login disimpan di file, cukup untuk satu instance saja.
+
+---
+
+## 0d. Journal keputusan manual
+
+Setiap kartu sinyal aktif sekarang punya tiga keputusan operator:
+
+- **AMBIL PAPER** — catat actual entry paper dan actual risk dalam persen. Nilai awal
+  diisi dari rencana sinyal tetapi harus lo cek dan boleh lo ubah sebelum simpan.
+- **PANTAU** — catat bahwa sinyal sengaja dipantau tanpa mengarang fill atau outcome.
+- **LEWATI** — pilih alasan (`risk terlalu besar`, `sudah terlambat`, `struktur tidak
+  jelas`, `event risk`, atau `lainnya`) dan tambahkan catatan bebas bila perlu.
+
+Satu identitas sinyal (`coin + waktu candle tutup`) hanya boleh punya satu keputusan
+awal. Saat disimpan, server membekukan timestamp keputusan dan inti sinyal yang terlihat
+saat itu: side, score/mode, harga, seluruh level rencana, indikator, dan alasan konfluensi.
+Journal di bawah kartu bisa difilter menurut aksi dan coin. Karena datanya server-side,
+catatan yang sama terlihat dari perangkat lain setelah login.
+
+Data append-only ada di `${SCREENER_DATA_DIR}/signal-decisions.jsonl`, jadi volume
+`SCREENER_DATA_DIR` wajib tetap terpasang saat recreate/deploy dan file ini harus ikut
+backup. `POST /api/decisions` hanya menerima sesi login aktif dan request same-origin;
+request lintas situs ditolak. `GET /api/decisions` juga tetap di balik login.
+
+Journal ini adalah **bukti keputusan manual**, bukan koneksi exchange. Menekan tombol
+apa pun tidak membuat order, tidak memakai uang nyata, dan tidak menciptakan hasil trade
+palsu. Kalau kelak perlu mencatat perkembangan, tambahkan event status append-only yang
+benar-benar diamati; jangan menulis outcome yang tidak terjadi.
 
 ---
 
