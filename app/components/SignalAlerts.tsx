@@ -7,12 +7,17 @@ import {
   defaultAlertPrefs, inboxUnread, markInboxRead, mergeInbox, mergeInboxBaseline,
   newSignals, notifiable, signalKey, summarize, trimSeen,
 } from "../lib/notify";
+import { audioSupported, chimeForSignal, chimeForStatus, clampVolume, playChime, unlockAudio } from "../lib/chime";
 
 const SEEN_STORE = "screener_seen_signals";
 const INBOX_STORE = "screener_signal_inbox_v1";
 const PREF = "screener_notify_on";
 const ALERT_PREFS = "screener_status_alert_prefs_v1";
-const ALERT_STATES = "screener_status_alert_states_v1";
+// v2 stores an array of reached milestones per signal; v1 stored a single state
+// string and is intentionally ignored rather than migrated.
+const ALERT_STATES = "screener_status_alert_states_v2";
+const SOUND_PREF = "screener_alert_sound_v1";
+const VOLUME_PREF = "screener_alert_volume_v1";
 
 type Toast = { key: string; text: string; sig: "LONG" | "SHORT" };
 
@@ -32,6 +37,8 @@ export default function SignalAlerts({
   const [enabled, setEnabled] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState<AlertPrefs>(defaultAlertPrefs);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sound, setSound] = useState(false);
+  const [volume, setVolume] = useState(0.7);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const seen = useRef<Set<string>>(new Set());
@@ -48,7 +55,30 @@ export default function SignalAlerts({
       const storedPrefs = localStorage.getItem(ALERT_PREFS);
       if (storedPrefs) setAlertPrefs({ ...defaultAlertPrefs, ...JSON.parse(storedPrefs) });
       const storedStates = localStorage.getItem(ALERT_STATES);
-      if (storedStates) statusStates.current = new Map(JSON.parse(storedStates));
+      if (storedStates) {
+        // Drop anything that is not a milestone array, so a corrupt or foreign
+        // value cannot make every level look already-fired (or re-fire).
+        const parsed = JSON.parse(storedStates) as [string, unknown][];
+        statusStates.current = new Map(
+          (Array.isArray(parsed) ? parsed : [])
+            .filter(([key, value]) => typeof key === "string" && Array.isArray(value))
+            .map(([key, value]) => [key, (value as string[]).filter(
+              (k) => ["ENTRY", "INVALIDATED", "TP1", "TP2"].includes(k)) as AlertState]),
+        );
+      }
+      const storedVolume = localStorage.getItem(VOLUME_PREF);
+      if (storedVolume != null) setVolume(clampVolume(Number(storedVolume)));
+      // Audio cannot be resumed without a gesture, so a stored preference only
+      // arms a one-shot unlock on the first click anywhere on the page.
+      if (localStorage.getItem(SOUND_PREF) === "1") {
+        const arm = () => {
+          if (unlockAudio()) setSound(true);
+          window.removeEventListener("pointerdown", arm);
+          window.removeEventListener("keydown", arm);
+        };
+        window.addEventListener("pointerdown", arm, { once: true });
+        window.addEventListener("keydown", arm, { once: true });
+      }
       setEnabled(localStorage.getItem(PREF) === "1");
     } catch { /* private mode: fall back to in-memory only */ }
     setPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -86,6 +116,9 @@ export default function SignalAlerts({
       ...cur,
     ].slice(0, 4));
 
+    // Sound first: it is the part that reaches you when you are not looking.
+    if (sound) for (const r of fresh) playChime(chimeForSignal(r.sig!), volume);
+
     if (enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
       for (const r of fresh) {
         try {
@@ -95,7 +128,7 @@ export default function SignalAlerts({
         } catch {}
       }
     }
-  }, [rows, enabled]);
+  }, [rows, enabled, sound, volume]);
 
   useEffect(() => {
     if (!hydrated.current) return;
@@ -106,6 +139,7 @@ export default function SignalAlerts({
       localStorage.setItem(ALERT_PREFS, JSON.stringify(alertPrefs));
     } catch {}
     if (!transition.events.length) return;
+    if (sound) playChime(chimeForStatus(transition.events[0].kind), volume);
     setToasts((cur) => [...transition.events.map((event) => ({
       key: `${event.key}-${event.kind}`, text: event.text, sig: event.sig,
     })), ...cur].slice(0, 4));
@@ -114,7 +148,7 @@ export default function SignalAlerts({
         try { new Notification(`Update ${event.coin}: ${event.kind}`, { body: event.text, tag: `${event.key}-${event.kind}` }); } catch {}
       }
     }
-  }, [rows, enabled, alertPrefs]);
+  }, [rows, enabled, alertPrefs, sound, volume]);
 
   useEffect(() => {
     if (!toasts.length) return;
@@ -143,6 +177,29 @@ export default function SignalAlerts({
     onOpenSignal(item.coin);
   };
 
+  /**
+   * Browsers only allow audio to start from a user gesture, so the toggle both
+   * unlocks the AudioContext and plays a sample: you hear exactly what will fire.
+   */
+  const toggleSound = () => {
+    if (sound) {
+      setSound(false);
+      try { localStorage.setItem(SOUND_PREF, "0"); } catch {}
+      return;
+    }
+    if (!unlockAudio()) return;
+    setSound(true);
+    try { localStorage.setItem(SOUND_PREF, "1"); } catch {}
+    playChime("NEW_LONG", volume);
+  };
+
+  const changeVolume = (next: number) => {
+    const safe = clampVolume(next);
+    setVolume(safe);
+    try { localStorage.setItem(VOLUME_PREF, String(safe)); } catch {}
+    if (sound) playChime("STATUS", safe);
+  };
+
   const label =
     permission === "unsupported" ? "NOTIF TIDAK DIDUKUNG"
     : permission === "denied" ? "NOTIF DIBLOKIR BROWSER"
@@ -160,6 +217,14 @@ export default function SignalAlerts({
         ☰ INBOX {unread > 0 && <i>{unread > 99 ? "99+" : unread}</i>}
       </button>
       <button className={settingsOpen ? "notifOn" : ""} onClick={() => setSettingsOpen((v) => !v)}>⚙ ALERT STATUS</button>
+      <button className={sound ? "notifOn" : ""} onClick={toggleSound} disabled={!audioSupported()}>
+        {!audioSupported() ? "SUARA TIDAK DIDUKUNG" : sound ? "🔊 SUARA AKTIF" : "🔈 SUARA MATI"}
+      </button>
+      {sound && <label className="volCtl">KERAS
+        <input type="range" min={0.2} max={1} step={0.1} value={volume}
+          onChange={(e) => changeVolume(Number(e.target.value))} />
+        <b>{Math.round(volume * 100)}%</b>
+      </label>}
       <small>
         {permission === "denied"
           ? "Notifikasi browser diblokir. Inbox sinyal dan kartu peringatan tetap bekerja."
@@ -171,7 +236,7 @@ export default function SignalAlerts({
       <b>UPDATE STATUS YANG DINOTIFIKASIKAN</b>
       {([
         ["entry", "MASUK ZONA ENTRY"], ["invalidated", "INVALID / STOP"],
-        ["tp1", "TP1 TERSENTUH"], ["tp2", "TP2 TERSENTUH"], ["timeout", "TIMEOUT 24 JAM"],
+        ["tp1", "TP1 TERSENTUH"], ["tp2", "TP2 TERSENTUH"],
       ] as [keyof AlertPrefs, string][]).map(([key, text]) => (
         <label key={key}><input type="checkbox" checked={alertPrefs[key]}
           onChange={(e) => setAlertPrefs((cur) => ({ ...cur, [key]: e.target.checked }))} /> {text}</label>

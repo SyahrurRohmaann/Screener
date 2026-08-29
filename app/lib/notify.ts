@@ -95,52 +95,64 @@ export function mergeInboxBaseline(current: InboxItem[], baseline: Row[]): Inbox
     existing.has(item.key) ? item : { ...item, read: true });
 }
 
-export type AlertKind = "ENTRY" | "INVALIDATED" | "TP1" | "TP2" | "TIMEOUT";
-export type AlertState = "WAITING" | AlertKind;
+export type AlertKind = "ENTRY" | "INVALIDATED" | "TP1" | "TP2";
+/** Every milestone already announced for a signal. Order is irrelevant. */
+export type AlertState = AlertKind[];
 export type AlertPrefs = {
-  entry: boolean; invalidated: boolean; tp1: boolean; tp2: boolean; timeout: boolean;
+  entry: boolean; invalidated: boolean; tp1: boolean; tp2: boolean;
 };
 export const defaultAlertPrefs: AlertPrefs = {
-  entry: true, invalidated: true, tp1: true, tp2: true, timeout: false,
+  entry: true, invalidated: true, tp1: true, tp2: true,
 };
 export type StatusAlert = { key: string; coin: string; sig: "LONG" | "SHORT"; kind: AlertKind; text: string };
 
-function alertState(r: Row, now = Date.now()): AlertState {
-  if (!r.sig || !r.plan) return "WAITING";
+/**
+ * Every milestone the mark price has reached, not just the highest one. A jump
+ * straight past TP2 still credits ENTRY and TP1, and a retracement cannot
+ * un-reach a milestone, so nothing is ever announced twice.
+ */
+function reachedMilestones(r: Row): AlertKind[] {
+  if (!r.sig || !r.plan) return [];
   const p = r.price, plan = r.plan, long = r.sig === "LONG";
-  if (long ? p <= plan.invalidation : p >= plan.invalidation) return "INVALIDATED";
-  if (long ? p >= plan.tp2 : p <= plan.tp2) return "TP2";
-  if (long ? p >= plan.tp1 : p <= plan.tp1) return "TP1";
-  if (p >= plan.entry_low && p <= plan.entry_high) return "ENTRY";
-  if (r.signal_closed_at && now - r.signal_closed_at >= 48 * 30 * 60_000) return "TIMEOUT";
-  return "WAITING";
+  const reached: AlertKind[] = [];
+  if (long ? p >= plan.entry_low : p <= plan.entry_high) reached.push("ENTRY");
+  if (long ? p >= plan.tp1 : p <= plan.tp1) reached.push("TP1");
+  if (long ? p >= plan.tp2 : p <= plan.tp2) reached.push("TP2");
+  if (long ? p <= plan.invalidation : p >= plan.invalidation) reached.push("INVALIDATED");
+  return reached;
 }
 
-const preferenceFor = (state: AlertState): keyof AlertPrefs | null =>
-  state === "ENTRY" ? "entry" : state === "INVALIDATED" ? "invalidated"
-  : state === "TP1" ? "tp1" : state === "TP2" ? "tp2"
-  : state === "TIMEOUT" ? "timeout" : null;
+const preferenceFor = (kind: AlertKind): keyof AlertPrefs =>
+  kind === "ENTRY" ? "entry" : kind === "INVALIDATED" ? "invalidated"
+  : kind === "TP1" ? "tp1" : "tp2";
 
-const statusText = (r: Row, state: AlertState) =>
-  `${r.coin} ${r.sig} · ${state === "ENTRY" ? "harga masuk zona entry"
-    : state === "INVALIDATED" ? "stop/invalidation terlewati"
-    : state === "TP1" ? "TP1 tersentuh" : state === "TP2" ? "TP2 tersentuh"
-    : "setup timeout"}`;
+const statusText = (r: Row, kind: AlertKind) =>
+  `${r.coin} ${r.sig} · ${kind === "ENTRY" ? "harga masuk zona entry"
+    : kind === "INVALIDATED" ? "stop/invalidation terlewati"
+    : kind === "TP1" ? "TP1 tersentuh" : "TP2 tersentuh"}`;
 
-/** Advance state even for disabled kinds, so enabling later never replays history. */
+/**
+ * Fires each milestone at most once per signal. Milestones are recorded even
+ * when their alert type is disabled, so enabling one later never replays history.
+ * The first observation of a signal is a baseline and never announces.
+ */
 export function alertTransitions(
-  rows: Row[], previous: ReadonlyMap<string, AlertState>, prefs: AlertPrefs, now = Date.now(),
+  rows: Row[], previous: ReadonlyMap<string, AlertState>, prefs: AlertPrefs,
 ): { states: Map<string, AlertState>; events: StatusAlert[] } {
   const states = new Map(previous);
   const events: StatusAlert[] = [];
   for (const r of notifiable(rows)) {
     const key = signalKey(r);
-    const next = alertState(r, now);
-    const before = previous.get(key) ?? next; // first observation is baseline
-    states.set(key, next);
-    if (next === before || next === "WAITING") continue;
-    const pref = preferenceFor(next);
-    if (pref && prefs[pref]) events.push({ key, coin: r.coin, sig: r.sig!, kind: next, text: statusText(r, next) });
+    const reached = reachedMilestones(r);
+    const known = previous.get(key);
+    const fired = known ?? reached; // unseen signal: adopt as baseline silently
+    const merged = Array.from(new Set([...fired, ...reached]));
+    states.set(key, merged);
+    if (!known) continue;
+    for (const kind of reached) {
+      if (fired.includes(kind) || !prefs[preferenceFor(kind)]) continue;
+      events.push({ key, coin: r.coin, sig: r.sig!, kind, text: statusText(r, kind) });
+    }
   }
   return { states, events };
 }

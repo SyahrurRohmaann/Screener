@@ -557,11 +557,48 @@ itu nanti perlu scheduler server + service worker/VAPID, bukan sekadar izin
 notifikasi browser.
 
 Tombol `⚙ ALERT STATUS` mengatur event lanjutan per sinyal: masuk zona entry,
-invalid/stop, TP1, TP2, dan timeout 24 jam. Empat event pertama aktif secara
-default; timeout default mati agar tidak berisik. State terakhir disimpan lokal,
-jadi event yang sama tidak diulang setelah refresh atau saat opsi baru diaktifkan.
-Alert ini mengikuti mark price realtime selama halaman aktif; ia informasi status,
-bukan bukti fill atau eksekusi order.
+invalid/stop, TP1, dan TP2. Semuanya aktif secara default. Yang disimpan bukan
+"status terakhir" melainkan **daftar level yang sudah pernah tercapai**, sehingga:
+
+- Harga mundur dari TP2 ke TP1 lalu naik lagi **tidak** mengumumkan TP1/TP2 kedua kali.
+- Keluar-masuk zona entry berulang **tidak** mengulang alert entry.
+- Lompatan harga langsung melewati TP2 tetap mencatat entry dan TP1 yang terlewati.
+- Level yang alert-nya sedang dimatikan tetap dicatat, jadi menyalakannya nanti
+  tidak memuntahkan riwayat lama.
+
+Sinyal yang baru pertama terlihat dijadikan baseline dan tidak pernah langsung
+berbunyi. Alert ini mengikuti mark price realtime selama halaman aktif; ia
+informasi status, bukan bukti fill atau eksekusi order.
+
+Tidak ada alert `TIMEOUT` di sini. Timeout 48 candle tetap dipakai di evaluasi
+riwayat (`Signal History`), tapi sebagai notifikasi ia tidak bisa dijamin: sinyal
+lama sudah hilang dari feed 30 detik jauh sebelum 24 jam berlalu, jadi alert
+timeout hanya akan berbunyi kalau kebetulan sinyalnya masih dihitung ulang.
+Menjanjikannya berarti menjanjikan sesuatu yang tidak dikerjakan.
+
+### Suara alert
+
+Tombol `🔈 SUARA MATI` / `🔊 SUARA AKTIF` menyalakan nada yang disintesis langsung
+di browser lewat WebAudio — tidak ada file audio yang diunduh dan tidak ada
+permintaan jaringan. Nadanya gelombang kotak, bukan sinus, supaya lebih menusuk
+dan tidak tenggelam di suara lain:
+
+```text
+Sinyal LONG baru    →  tiga nada NAIK    (G5 → C6 → E6), total ~0,7 detik
+Sinyal SHORT baru   →  tiga nada TURUN   (E6 → C6 → G5), total ~0,7 detik
+Stop/invalid        →  dua nada RENDAH   (A4 → E4), terdengar "gagal"
+Update lain         →  dua ketuk pendek  (B5 ×2)
+```
+
+Arah sinyal bisa dikenali tanpa melihat layar: naik berarti LONG, turun berarti
+SHORT. Slider `KERAS` mengatur volume 20–100% dan langsung memainkan sampelnya.
+
+Browser melarang audio berbunyi tanpa interaksi manusia, jadi suara **harus**
+dinyalakan lewat tombol. Saat dinyalakan, satu sampel langsung diputar supaya lo
+tahu persis bunyinya. Kalau pilihan ini tersimpan lalu lo reload, suara baru
+aktif kembali setelah klik atau tekan tombol pertama di halaman — ini batasan
+browser, bukan bug. Kalau browsernya tidak punya WebAudio, tombolnya mati dengan
+label `SUARA TIDAK DIDUKUNG` dan kartu peringatan tetap bekerja.
 
 ### Indikator sumber harga
 

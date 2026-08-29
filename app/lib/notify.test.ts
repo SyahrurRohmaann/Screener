@@ -118,51 +118,89 @@ test("baseline merge marks only baseline additions read, preserving older unread
   assert.equal(inboxUnread(merged), 1);
 });
 
-test("status alerts fire once when price crosses entry, TP1, TP2, or stop", () => {
-  const long = row({ sig: "LONG", price: 99.5, plan: {
-    entry_low: 99, entry_high: 100, invalidation: 97,
-    risk_pct: 3, tp1: 102, tp2: 104, rr1: 1, rr2: 2,
-  } });
-  const key = signalKey(long);
-  const prefs = { ...defaultAlertPrefs, entry: true, invalidated: true, tp1: true, tp2: true, timeout: false };
+const LONG_PLAN = {
+  entry_low: 99, entry_high: 100, invalidation: 97,
+  risk_pct: 3, tp1: 102, tp2: 104, rr1: 1, rr2: 2,
+};
+const SHORT_PLAN = {
+  entry_low: 99, entry_high: 100, invalidation: 102,
+  risk_pct: 3, tp1: 97, tp2: 95, rr1: 1, rr2: 2,
+};
 
-  const entry = alertTransitions([long], new Map([[key, "WAITING"]]), prefs);
+test("each milestone fires exactly once for a LONG", () => {
+  const long = row({ sig: "LONG", price: 98, plan: LONG_PLAN });
+  const key = signalKey(long);
+  const base = alertTransitions([long], new Map(), defaultAlertPrefs);
+  assert.deepEqual(base.events, [], "first sighting is a baseline, not news");
+
+  const entry = alertTransitions([{ ...long, price: 99.5 }], base.states, defaultAlertPrefs);
   assert.deepEqual(entry.events.map((e) => e.kind), ["ENTRY"]);
-  assert.equal(entry.states.get(key), "ENTRY");
 
-  const firstTp = alertTransitions([{ ...long, price: 102 }], entry.states, prefs);
-  assert.deepEqual(firstTp.events.map((e) => e.kind), ["TP1"]);
-
-  const secondTp = alertTransitions([{ ...long, price: 104 }], firstTp.states, prefs);
-  assert.deepEqual(secondTp.events.map((e) => e.kind), ["TP2"]);
-
-  const stop = alertTransitions([{ ...long, price: 97 }], entry.states, prefs);
-  assert.deepEqual(stop.events.map((e) => e.kind), ["INVALIDATED"]);
-});
-
-test("status alerts understand SHORT direction and never repeat unchanged state", () => {
-  const short = row({ sig: "SHORT", price: 100 });
-  const key = signalKey(short);
-  const prefs = { ...defaultAlertPrefs, entry: true, invalidated: true, tp1: true, tp2: true };
-  const initial = alertTransitions([short], new Map([[key, "WAITING"]]), prefs);
-  assert.deepEqual(initial.events.map((e) => e.kind), ["ENTRY"]);
-  const same = alertTransitions([short], initial.states, prefs);
-  assert.deepEqual(same.events, []);
-  const tp1 = alertTransitions([{ ...short, price: 97 }], same.states, prefs);
+  const tp1 = alertTransitions([{ ...long, price: 102 }], entry.states, defaultAlertPrefs);
   assert.deepEqual(tp1.events.map((e) => e.kind), ["TP1"]);
-  const stop = alertTransitions([{ ...short, price: 101 }], initial.states, prefs);
+
+  const tp2 = alertTransitions([{ ...long, price: 104 }], tp1.states, defaultAlertPrefs);
+  assert.deepEqual(tp2.events.map((e) => e.kind), ["TP2"]);
+
+  const stop = alertTransitions([{ ...long, price: 97 }], tp2.states, defaultAlertPrefs);
   assert.deepEqual(stop.events.map((e) => e.kind), ["INVALIDATED"]);
 });
 
-test("disabled alert kinds still advance state so enabling later does not replay history", () => {
-  const long = row({ sig: "LONG", price: 102, plan: {
-    entry_low: 99, entry_high: 100, invalidation: 97,
-    risk_pct: 3, tp1: 102, tp2: 104, rr1: 1, rr2: 2,
-  } });
+test("a SHORT mirrors every boundary", () => {
+  const short = row({ sig: "SHORT", price: 101, plan: SHORT_PLAN });
+  const base = alertTransitions([short], new Map(), defaultAlertPrefs);
+  const entry = alertTransitions([{ ...short, price: 99.5 }], base.states, defaultAlertPrefs);
+  assert.deepEqual(entry.events.map((e) => e.kind), ["ENTRY"]);
+  const tp1 = alertTransitions([{ ...short, price: 97 }], entry.states, defaultAlertPrefs);
+  assert.deepEqual(tp1.events.map((e) => e.kind), ["TP1"]);
+  const tp2 = alertTransitions([{ ...short, price: 95 }], tp1.states, defaultAlertPrefs);
+  assert.deepEqual(tp2.events.map((e) => e.kind), ["TP2"]);
+  const stop = alertTransitions([{ ...short, price: 102 }], tp2.states, defaultAlertPrefs);
+  assert.deepEqual(stop.events.map((e) => e.kind), ["INVALIDATED"]);
+});
+
+test("retracing and revisiting a level never re-announces it", () => {
+  const long = row({ sig: "LONG", price: 98, plan: LONG_PLAN });
+  const base = alertTransitions([long], new Map(), defaultAlertPrefs);
+  const tp2 = alertTransitions([{ ...long, price: 104 }], base.states, defaultAlertPrefs);
+  assert.deepEqual(tp2.events.map((e) => e.kind).sort(), ["ENTRY", "TP1", "TP2"]);
+
+  const back = alertTransitions([{ ...long, price: 102 }], tp2.states, defaultAlertPrefs);
+  assert.deepEqual(back.events, [], "falling back to TP1 is not a new TP1");
+  const again = alertTransitions([{ ...long, price: 104 }], back.states, defaultAlertPrefs);
+  assert.deepEqual(again.events, [], "revisiting TP2 is not a second TP2");
+  const out = alertTransitions([{ ...long, price: 98 }], again.states, defaultAlertPrefs);
+  assert.deepEqual(out.events, []);
+  const inZone = alertTransitions([{ ...long, price: 99.5 }], out.states, defaultAlertPrefs);
+  assert.deepEqual(inZone.events, [], "re-entering the zone is not a second ENTRY");
+});
+
+test("a jump straight past TP2 credits the levels it skipped over", () => {
+  const long = row({ sig: "LONG", price: 98, plan: LONG_PLAN });
+  const base = alertTransitions([long], new Map(), defaultAlertPrefs);
+  const jump = alertTransitions([{ ...long, price: 130 }], base.states, defaultAlertPrefs);
+  assert.deepEqual(jump.events.map((e) => e.kind).sort(), ["ENTRY", "TP1", "TP2"]);
   const key = signalKey(long);
-  const off = alertTransitions([long], new Map([[key, "WAITING"]]), { ...defaultAlertPrefs, entry: false, tp1: false });
-  assert.deepEqual(off.events, []);
-  assert.equal(off.states.get(key), "TP1");
-  const enabled = alertTransitions([long], off.states, { ...defaultAlertPrefs, tp1: true });
-  assert.deepEqual(enabled.events, []);
+  assert.deepEqual(jump.states.get(key)!.slice().sort(), ["ENTRY", "TP1", "TP2"]);
+});
+
+test("disabled kinds are still recorded so enabling later replays nothing", () => {
+  const long = row({ sig: "LONG", price: 98, plan: LONG_PLAN });
+  const key = signalKey(long);
+  const base = alertTransitions([long], new Map(), defaultAlertPrefs);
+  const muted = alertTransitions([{ ...long, price: 102 }], base.states,
+    { ...defaultAlertPrefs, entry: false, tp1: false });
+  assert.deepEqual(muted.events, []);
+  assert.deepEqual(muted.states.get(key)!.slice().sort(), ["ENTRY", "TP1"]);
+  const later = alertTransitions([{ ...long, price: 102 }], muted.states, defaultAlertPrefs);
+  assert.deepEqual(later.events, [], "turning TP1 on must not resurrect an old touch");
+});
+
+test("a signal that vanishes from the feed keeps its recorded milestones", () => {
+  const long = row({ sig: "LONG", price: 102, plan: LONG_PLAN });
+  const key = signalKey(long);
+  const base = alertTransitions([long], new Map(), defaultAlertPrefs);
+  const gone = alertTransitions([], base.states, defaultAlertPrefs);
+  assert.deepEqual(gone.events, []);
+  assert.deepEqual(gone.states.get(key), base.states.get(key));
 });
