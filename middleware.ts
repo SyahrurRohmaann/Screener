@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const COOKIE = "screener_session";
-const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+// The manifest and icons must be readable without a session or Chrome will not offer to
+// install the app; they contain no market data. Fonts likewise, so the login page keeps
+// its typography.
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/manifest.webmanifest"];
+const PUBLIC_PREFIXES = ["/icons/", "/fonts/"];
 // Logout must not have its cookie slid forward, or the sign-out would be undone.
 const NO_REFRESH_PATHS = ["/api/auth/logout"];
 const secureCookies = () => process.env.SCREENER_COOKIE_SECURE === "1";
@@ -31,6 +35,7 @@ const IDLE_SECONDS = 2 * 60 * 60;
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PATHS.some((x) => pathname === x)) return harden(NextResponse.next());
+  if (PUBLIC_PREFIXES.some((x) => pathname.startsWith(x))) return harden(NextResponse.next());
 
   const id = req.cookies.get(COOKIE)?.value;
   if (id) {
