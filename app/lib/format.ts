@@ -8,6 +8,8 @@ export type Row = {
   trend_1h: string; timeframe?: string; mode?: "TREND" | "COUNTER" | null; status?: string;
   age_min?: number; atr_pct?: number | null; plan?: Plan | null; reasons?: string[];
   funding?: number; oi_chg?: number; ls_ratio?: number; taker?: number;
+  // Closed candle the signal was born on; the stable half of a signal's identity.
+  signal_closed_at?: number;
 };
 
 export type Bar = {

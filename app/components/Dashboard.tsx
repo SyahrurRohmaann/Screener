@@ -6,6 +6,7 @@ import Chart from "./Chart";
 import History from "./History";
 import RiskCalculator from "./RiskCalculator";
 import AccountPanel from "./auth/AccountPanel";
+import SignalAlerts from "./SignalAlerts";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveStatus, money, num, pct, planEntry } from "../lib/format";
 
@@ -145,6 +146,7 @@ export default function Dashboard() {
     </header>
 
     <AccountPanel />
+    <SignalAlerts rows={rows} />
 
     <section className="hero">
       <div>
