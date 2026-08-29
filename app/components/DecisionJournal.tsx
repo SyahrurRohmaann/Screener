@@ -49,12 +49,29 @@ export default function DecisionJournal({ rows }: { rows: Row[] }) {
   const shown = journal.filter((x) => (filter === "ALL" || x.action === filter) && (coin === "ALL" || x.signal.coin === coin));
   const coins = Array.from(new Set(journal.map((x) => x.signal.coin))).sort();
 
-  function choose(row: Row, action: DecisionAction) {
+  const choose = useCallback((row: Row, action: DecisionAction) => {
     setMessage(""); setNote(""); setReason("RISK_TOO_HIGH");
     setEntry(action === "PAPER" ? String(row.sig === "LONG" ? row.plan?.entry_high ?? "" : row.plan?.entry_low ?? "") : "");
     setRisk(action === "PAPER" ? String(row.plan?.risk_pct ?? "") : "");
     setActive({ row, action });
-  }
+  }, []);
+
+  // The buttons on each signal card live in Dashboard and reach this component
+  // through a window event. Without this listener those buttons do nothing.
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<{ row: Row; action: DecisionAction }>).detail;
+      if (!detail?.row || !detail.action) return;
+      if (detail.row.signal_closed_at == null) return;
+      if (decided.has(`${detail.row.coin}-${detail.row.signal_closed_at}`)) {
+        setMessage(`${detail.row.coin} sudah punya keputusan awal.`);
+        return;
+      }
+      choose(detail.row, detail.action);
+    };
+    window.addEventListener(OPEN_EVENT, open);
+    return () => window.removeEventListener(OPEN_EVENT, open);
+  }, [choose, decided]);
 
   async function save() {
     if (!active) return;
@@ -98,7 +115,7 @@ export default function DecisionJournal({ rows }: { rows: Row[] }) {
       {shown.length ? <div className="journalTableWrap"><table className="statTable"><thead><tr><th>WAKTU</th><th>SINYAL</th><th>AKSI</th><th>ACTUAL PAPER</th><th>ALASAN / CATATAN</th></tr></thead><tbody>{shown.map((x) => <tr key={x.id}><td>{new Date(x.decided_at).toLocaleString("id-ID")}</td><td>{x.signal.coin} · {x.signal.sig} · {x.signal.score}/6<br /><small>candle {new Date(x.signal.signal_closed_at).toLocaleString("id-ID")}</small></td><td>{LABEL[x.action]}</td><td>{x.action === "PAPER" ? `${money(x.actual_entry)} · risk ${x.actual_risk_pct}%` : "—"}</td><td>{x.action === "SKIP" ? x.skip_reason : "—"}{x.note ? <><br /><small>{x.note}</small></> : null}</td></tr>)}</tbody></table></div> : <p className="journalEmpty">Belum ada keputusan untuk filter ini.</p>}
     </section>
 
-    {active && <div className="modalWrap"><button className="modalBack" aria-label="Tutup" onClick={() => setActive(null)} /><div className="modal decisionModal"><div className="modalHead"><div><b>{LABEL[active.action]} · {active.row.coin} {active.row.sig}</b><small>Sinyal candle {new Date(active.row.signal_closed_at!).toLocaleString("id-ID")} akan dibekukan bersama keputusan.</small></div><button onClick={() => setActive(null)}>✕</button></div>
+    {active && <div className="modalWrap"><button className="modalBack" aria-label="Tutup" onClick={() => setActive(null)} /><div className="modal decisionModal"><div className="modalHead"><div><b>{LABEL[active.action]} · {active.row.coin} {active.row.sig}</b><small>Bukti sinyal candle {new Date(active.row.signal_closed_at!).toLocaleString("id-ID")} diambil server dari riwayatnya sendiri, bukan dari layar ini.</small></div><button onClick={() => setActive(null)}>✕</button></div>
       {active.action === "PAPER" && <div className="decisionFields"><label><span>ACTUAL ENTRY PAPER</span><input type="number" min="0" step="any" value={entry} onChange={(e) => setEntry(e.target.value)} /></label><label><span>ACTUAL RISK (%)</span><input type="number" min="0" max="100" step="any" value={risk} onChange={(e) => setRisk(e.target.value)} /></label></div>}
       {active.action === "SKIP" && <label className="decisionField"><span>ALASAN LEWATI</span><select value={reason} onChange={(e) => setReason(e.target.value as SkipReason)}>{SKIP_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>}
       <label className="decisionField"><span>CATATAN BEBAS (OPSIONAL)</span><textarea maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} /></label>
