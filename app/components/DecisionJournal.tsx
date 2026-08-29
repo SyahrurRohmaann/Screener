@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Row } from "../lib/format";
-import type { Decision, DecisionAction, SignalEvidence, SkipReason } from "../lib/decision-journal";
+import type { Decision, DecisionAction, SkipReason } from "../lib/decision-journal";
 import { money } from "../lib/format";
 
 const LABEL: Record<DecisionAction, string> = { PAPER: "AMBIL PAPER", WATCH: "PANTAU", SKIP: "LEWATI" };
@@ -16,16 +16,13 @@ export function openSignalDecision(row: Row, action: DecisionAction) {
   window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { row, action } }));
 }
 
-function evidence(row: Row): SignalEvidence {
+/**
+ * Only the signal key travels to the server; the evidence itself is looked up
+ * server-side from the recorded closed candle, so the journal cannot be forged.
+ */
+function signalKeyOf(row: Row): string {
   if (!row.sig || !row.plan || row.signal_closed_at == null) throw new Error("Identitas sinyal belum lengkap.");
-  return {
-    key: `${row.coin}-${row.signal_closed_at}`, coin: row.coin, sig: row.sig,
-    signal_closed_at: row.signal_closed_at, score: row.score, mode: row.mode ?? null,
-    close: row.price, entry_low: row.plan.entry_low, entry_high: row.plan.entry_high,
-    invalidation: row.plan.invalidation, tp1: row.plan.tp1, tp2: row.plan.tp2,
-    risk_pct: row.plan.risk_pct, rsi: Number.isFinite(row.rsi) ? row.rsi : null,
-    trend_1h: row.trend_1h, atr_pct: row.atr_pct ?? null, reasons: row.reasons ?? [],
-  };
+  return `${row.coin}-${row.signal_closed_at}`;
 }
 
 export default function DecisionJournal({ rows }: { rows: Row[] }) {
@@ -63,7 +60,7 @@ export default function DecisionJournal({ rows }: { rows: Row[] }) {
     if (!active) return;
     setSaving(true); setMessage("");
     try {
-      const base = { signal: evidence(active.row), action: active.action, note: note.trim() || undefined };
+      const base = { signal_key: signalKeyOf(active.row), action: active.action, note: note.trim() || undefined };
       const body = active.action === "PAPER" ? { ...base, actual_entry: Number(entry), actual_risk_pct: Number(risk) }
         : active.action === "SKIP" ? { ...base, skip_reason: reason } : base;
       const response = await fetch("/api/decisions", {

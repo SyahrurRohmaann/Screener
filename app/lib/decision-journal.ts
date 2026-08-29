@@ -1,39 +1,27 @@
 import { appendFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { readHistory, type SignalRecord } from "./store";
 
 export const DECISION_ACTIONS = ["PAPER", "WATCH", "SKIP"] as const;
 export type DecisionAction = typeof DECISION_ACTIONS[number];
 export const SKIP_REASONS = ["RISK_TOO_HIGH", "LATE", "STRUCTURE_UNCLEAR", "EVENT_RISK", "OTHER"] as const;
 export type SkipReason = typeof SKIP_REASONS[number];
 
-export type SignalEvidence = {
-  key: string;
-  coin: string;
-  sig: "LONG" | "SHORT";
-  signal_closed_at: number;
-  score: number;
-  mode: "TREND" | "COUNTER" | null;
-  close: number;
-  entry_low: number;
-  entry_high: number;
-  invalidation: number;
-  tp1: number;
-  tp2: number;
-  risk_pct: number;
-  rsi: number | null;
-  trend_1h: string;
-  atr_pct: number | null;
-  reasons: string[];
-};
+/**
+ * Frozen copy of what the server itself recorded when the candle closed. It is
+ * resolved from signals.jsonl, never accepted from the client, so the journal
+ * cannot be used to invent a prettier setup after the fact.
+ */
+export type SignalEvidence = SignalRecord;
 
-type BaseInput = { signal: SignalEvidence; note?: string };
+type BaseInput = { signal_key: string; note?: string };
 export type DecisionInput =
   | (BaseInput & { action: "PAPER"; actual_entry: number; actual_risk_pct: number })
   | (BaseInput & { action: "WATCH" })
   | (BaseInput & { action: "SKIP"; skip_reason: SkipReason });
 
-export type Decision = DecisionInput & { id: string; decided_at: number };
+export type Decision = DecisionInput & { id: string; decided_at: number; signal: SignalEvidence };
 
 function dataDir() { return process.env.SCREENER_DATA_DIR ?? join(process.cwd(), ".data"); }
 function file() { return join(dataDir(), "signal-decisions.jsonl"); }
@@ -42,8 +30,7 @@ function lockFile() { return `${file()}.lock`; }
 function finitePositive(value: unknown) { return typeof value === "number" && Number.isFinite(value) && value > 0; }
 
 function validate(input: DecisionInput) {
-  const s = input?.signal;
-  if (!s || s.key !== `${s.coin}-${s.signal_closed_at}` || !/^[A-Z0-9]{2,15}$/.test(s.coin) || !["LONG", "SHORT"].includes(s.sig)) {
+  if (typeof input?.signal_key !== "string" || !/^[A-Z0-9]{2,15}-\d{10,16}$/.test(input.signal_key)) {
     throw new Error("Identitas sinyal tidak valid.");
   }
   if (!DECISION_ACTIONS.includes(input.action)) throw new Error("Aksi keputusan tidak valid.");
@@ -52,8 +39,6 @@ function validate(input: DecisionInput) {
     throw new Error("Actual entry dan risk PAPER harus angka positif yang valid.");
   }
   if (input.action === "SKIP" && !SKIP_REASONS.includes(input.skip_reason)) throw new Error("Alasan LEWATI wajib dipilih.");
-  const coreNumbers = [s.signal_closed_at, s.score, s.close, s.entry_low, s.entry_high, s.invalidation, s.tp1, s.tp2, s.risk_pct];
-  if (!coreNumbers.every((x) => typeof x === "number" && Number.isFinite(x))) throw new Error("Bukti inti sinyal tidak lengkap.");
 }
 
 async function load(): Promise<Decision[]> {
@@ -85,11 +70,21 @@ async function acquireLock() {
 
 export async function appendDecision(input: DecisionInput, now = Date.now()): Promise<Decision> {
   validate(input);
+  // Resolve the evidence from the server's own record of the closed candle. Anything
+  // the client sent about the signal itself is discarded.
+  const recorded = (await readHistory()).find((row) => row.key === input.signal_key);
+  if (!recorded) throw new Error("Sinyal tidak ditemukan di riwayat server.");
+  const { signal_key, ...rest } = input as DecisionInput & { signal?: unknown };
+  delete (rest as { signal?: unknown }).signal;
   const lock = await acquireLock();
   try {
     const existing = await load();
-    if (existing.some((row) => row.signal.key === input.signal.key)) throw new Error("Sinyal ini sudah memiliki keputusan awal.");
-    const decision = { ...structuredClone(input), id: randomUUID(), decided_at: now } as Decision;
+    if (existing.some((row) => row.signal.key === signal_key)) throw new Error("Sinyal ini sudah memiliki keputusan awal.");
+    const decision = {
+      ...structuredClone(rest), signal_key,
+      signal: structuredClone(recorded),
+      id: randomUUID(), decided_at: now,
+    } as Decision;
     await appendFile(file(), `${JSON.stringify(decision)}\n`, { encoding: "utf8", mode: 0o600 });
     return decision;
   } finally {

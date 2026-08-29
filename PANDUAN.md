@@ -196,8 +196,18 @@ Setiap kartu sinyal aktif sekarang punya tiga keputusan operator:
   jelas`, `event risk`, atau `lainnya`) dan tambahkan catatan bebas bila perlu.
 
 Satu identitas sinyal (`coin + waktu candle tutup`) hanya boleh punya satu keputusan
-awal. Saat disimpan, server membekukan timestamp keputusan dan inti sinyal yang terlihat
-saat itu: side, score/mode, harga, seluruh level rencana, indikator, dan alasan konfluensi.
+awal. Yang dikirim browser ke server **cuma identitas sinyal itu**, bukan angkanya.
+Server lalu mencari sinyal tersebut di riwayatnya sendiri
+(`${SCREENER_DATA_DIR}/signals.jsonl`) dan membekukan bukti dari sana: side,
+score/mode, close candle, seluruh level rencana, indikator, dan alasan konfluensi.
+Kalau sinyalnya tidak ada di riwayat server, keputusan ditolak.
+
+Ini penting dan sengaja: kalau bukti diambil dari body request, siapa pun yang sudah
+login bisa mengarang score, level, atau harga sinyal setelah kejadian — dan jurnalnya
+berhenti jadi bukti. Karena bukti diambil dari catatan candle tertutup, harga yang
+tersimpan adalah `close` candle itu, bukan mark price saat lo menekan tombol.
+Angka yang murni milik lo — actual entry dan actual risk paper — tetap dari input lo.
+
 Journal di bawah kartu bisa difilter menurut aksi dan coin. Karena datanya server-side,
 catatan yang sama terlihat dari perangkat lain setelah login.
 
