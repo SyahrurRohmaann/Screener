@@ -227,7 +227,6 @@ export default function Dashboard() {
           <div className="dots">{[1, 2, 3, 4, 5, 6].map((n) => <i className={n <= r.score ? "on" : ""} key={n} />)}</div>
         </div>
 
-        <p className="cardDisclaimer">INFORMASI SAJA · level berikut adalah kalkulator rencana, bukan rekomendasi entry.</p>
         {r.plan ? <div className="plan">
           {entry && <div className={`entryLive es-${entry.status.toLowerCase().replaceAll(" ", "-")}`}>
             <div className="entryLiveHead"><span>STATUS ENTRY · REALTIME</span><b>{entry.status}</b></div>
