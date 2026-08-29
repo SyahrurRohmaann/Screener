@@ -137,11 +137,24 @@ export async function GET() {
   if (denied) return denied;
 
   const counter = createApiCounter();
-  // Server time is fetched alongside the scan so clock drift is measured against the
-  // exchange that stamps the candles, not against whatever the container clock says.
-  const [rows, serverTime] = await Promise.all([
+  // Clock drift must be stamped immediately around the /fapi/v1/time response, not
+  // after the 60-call scan resolves: otherwise the scan duration is misread as skew
+  // and a perfectly synced host reports DEGRADED. Half the round trip is the best
+  // available correction for network latency.
+  let serverTimeMs: number | null = null;
+  const timeProbe = (async () => {
+    const sentAt = Date.now();
+    const answer = await getJson<{ serverTime: number }>("/fapi/v1/time", counter);
+    const receivedAt = Date.now();
+    if (!answer || !Number.isFinite(answer.serverTime)) return;
+    // Compare the exchange stamp against local time at the response's midpoint.
+    const localAtStamp = sentAt + (receivedAt - sentAt) / 2;
+    serverTimeMs = answer.serverTime + (Date.now() - localAtStamp);
+  })().catch(() => undefined);
+
+  const [rows] = await Promise.all([
     Promise.all(COINS.map((coin) => analyze(coin, counter))),
-    getJson<{ serverTime: number }>("/fapi/v1/time", counter),
+    timeProbe,
   ]);
 
   // Log every signal once per closed candle so performance can be audited later.
@@ -170,7 +183,7 @@ export async function GET() {
       : [])),
     api: counter.counts(),
     historyWrite,
-    serverTimeMs: serverTime && Number.isFinite(serverTime.serverTime) ? serverTime.serverTime : null,
+    serverTimeMs,
   });
 
   return NextResponse.json({

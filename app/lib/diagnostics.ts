@@ -33,7 +33,9 @@ export function buildMarketDiagnostics(input: MarketInput) {
   const apiStatus = classifyApi(input.api);
   const driftMs = input.serverTimeMs == null ? null : input.now - input.serverTimeMs;
   const clockStatus = classifyClockDrift(driftMs);
-  const historyStatus = input.historyWrite.status === "ERROR" ? "DEGRADED" : input.historyWrite.status === "SKIPPED" ? "UNKNOWN" : "OK";
+  // "No new signal this candle" is a known-good state, not an unknown one. Reserving
+  // UNKNOWN for "the source never answered" is the whole point of this panel.
+  const historyStatus = input.historyWrite.status === "ERROR" ? "DEGRADED" : "OK";
   return {
     overall: overallHealth([candleStatus, alignment, apiStatus, historyStatus, clockStatus]),
     generatedAt: input.now,
@@ -126,62 +128,103 @@ function ageText(ageMs: number | null): string {
 }
 
 /**
+ * How long a payload may go unrefreshed before the panel stops trusting it. The
+ * dashboard keeps its last successful payload on screen when a route starts
+ * failing (401 after the session expires, 500, network drop), so without this a
+ * dead source would keep showing its last healthy status indefinitely.
+ * Market/context poll every 30s; the price poll is far faster.
+ */
+export const PAYLOAD_STALE_MS = { market: 95_000, context: 95_000, price: 30_000 } as const;
+
+type Staleness = { stale: boolean; ageMs: number | null };
+function staleness(stampedAt: number | null | undefined, now: number, limitMs: number): Staleness {
+  if (stampedAt == null || !Number.isFinite(stampedAt)) return { stale: false, ageMs: null };
+  const ageMs = Math.max(0, now - stampedAt);
+  return { stale: ageMs > limitMs, ageMs };
+}
+
+function staleDetail(age: Staleness): string {
+  return `sumber berhenti menjawab · payload terakhir ${ageText(age.ageMs)}`;
+}
+
+/**
  * Collapses the three route payloads into one fixed list of six rows. The rows are
  * always present in the same order even when a payload has not arrived yet, so a
  * missing source shows as UNKNOWN instead of quietly disappearing from the panel.
+ * A payload that stopped being refreshed is reported STALE rather than left showing
+ * its last healthy status.
  */
 export function summarizeDataHealth(input: {
   market: MarketDiagnostics | null;
   context: ContextDiagnostics | null;
   price: PriceDiagnostics | null;
+  now?: number;
 }) {
   const { market, context, price } = input;
+  const now = input.now ?? Date.now();
+  const marketAge = staleness(market?.generatedAt, now, PAYLOAD_STALE_MS.market);
+  const contextAge = staleness(context?.observedAt, now, PAYLOAD_STALE_MS.context);
+  const priceAge = staleness(price?.observedAt, now, PAYLOAD_STALE_MS.price);
   const items: DataHealthItem[] = [
     {
       key: "candle", label: "CANDLE 30M",
-      status: market?.candle.status ?? "UNKNOWN",
-      detail: market
-        ? `${market.candle.availableCoins}/${market.candle.expectedCoins} coin · ${ageText(market.candle.ageMs)} · align ${market.candle.alignment}${market.candle.missingCoins?.length ? ` · hilang ${market.candle.missingCoins.join(", ")}` : ""}`
-        : "menunggu /api/market",
+      status: marketAge.stale ? "STALE" : market?.candle.status ?? "UNKNOWN",
+      detail: !market
+        ? "menunggu /api/market"
+        : marketAge.stale
+          ? staleDetail(marketAge)
+          : `${market.candle.availableCoins}/${market.candle.expectedCoins} coin · ${ageText(market.candle.ageMs)} · align ${market.candle.alignment}${market.candle.missingCoins?.length ? ` · hilang ${market.candle.missingCoins.join(", ")}` : ""}`,
     },
     {
       key: "api", label: "BINANCE API",
-      status: market?.api.status ?? "UNKNOWN",
-      detail: market
-        ? `${market.api.succeeded}/${market.api.requests} sukses · gagal ${market.api.failed} · rate-limit ${market.api.rateLimited}`
-        : "menunggu /api/market",
+      status: marketAge.stale ? "STALE" : market?.api.status ?? "UNKNOWN",
+      detail: !market
+        ? "menunggu /api/market"
+        : marketAge.stale
+          ? staleDetail(marketAge)
+          : `${market.api.succeeded}/${market.api.requests} sukses · gagal ${market.api.failed} · rate-limit ${market.api.rateLimited}`,
     },
     {
       key: "context", label: "KONTEKS DERIVATIF",
-      status: context?.status ?? "UNKNOWN",
-      detail: context
-        ? `${context.coverage.availableFields}/${context.coverage.expectedFields} field · ${context.coverage.availableCoins}/${context.coverage.expectedCoins} coin`
-        : "menunggu /api/context",
+      status: contextAge.stale ? "STALE" : context?.status ?? "UNKNOWN",
+      detail: !context
+        ? "menunggu /api/context"
+        : contextAge.stale
+          ? staleDetail(contextAge)
+          : `${context.coverage.availableFields}/${context.coverage.expectedFields} field · ${context.coverage.availableCoins}/${context.coverage.expectedCoins} coin`,
     },
     {
+      // Freshness alone is not health: a 502 answers instantly with no stamp, and a
+      // partial premiumIndex can be perfectly fresh while missing most coins.
       key: "price", label: "MARK PRICE",
-      status: price?.feed.status ?? "UNKNOWN",
-      detail: price
-        ? `${price.coverage.availableCoins}/${price.coverage.expectedCoins} coin · stamp ${ageText(price.feed.ageMs)}`
-        : "menunggu /api/price",
+      status: priceAge.stale ? "STALE" : price?.status ?? "UNKNOWN",
+      detail: !price
+        ? "menunggu /api/price"
+        : priceAge.stale
+          ? staleDetail(priceAge)
+          : `${price.coverage.availableCoins}/${price.coverage.expectedCoins} coin · stamp ${ageText(price.feed.ageMs)} · api ${price.api.status}${price.coverage.missingCoins?.length ? ` · hilang ${price.coverage.missingCoins.join(", ")}` : ""}`,
     },
     {
       key: "history", label: "TULIS HISTORY",
-      status: market ? (market.historyWrite.status === "ERROR" ? "BAD" : market.historyWrite.status === "SKIPPED" ? "UNKNOWN" : "OK") : "UNKNOWN",
-      detail: market
-        ? market.historyWrite.status === "ERROR"
-          ? "gagal menulis signals.jsonl — volume read-only atau penuh"
-          : market.historyWrite.status === "SKIPPED"
-            ? "tidak ada sinyal baru untuk dicatat"
-            : `${market.historyWrite.added} sinyal dicatat`
-        : "menunggu /api/market",
+      status: marketAge.stale ? "STALE" : market ? (market.historyWrite.status === "ERROR" ? "BAD" : "OK") : "UNKNOWN",
+      detail: !market
+        ? "menunggu /api/market"
+        : marketAge.stale
+          ? staleDetail(marketAge)
+          : market.historyWrite.status === "ERROR"
+            ? "gagal menulis signals.jsonl — volume read-only atau penuh"
+            : market.historyWrite.status === "SKIPPED"
+              ? "tidak ada sinyal baru untuk dicatat"
+              : `${market.historyWrite.added} sinyal dicatat`,
     },
     {
       key: "clock", label: "CLOCK DRIFT",
-      status: market?.clock.status ?? "UNKNOWN",
-      detail: market && market.clock.driftMs != null
-        ? `${market.clock.driftMs > 0 ? "+" : ""}${Math.round(market.clock.driftMs)}ms vs ${market.clock.source ?? "upstream"}`
-        : "waktu server upstream tidak terbaca",
+      status: marketAge.stale ? "STALE" : market?.clock.status ?? "UNKNOWN",
+      detail: marketAge.stale && market
+        ? staleDetail(marketAge)
+        : market && market.clock.driftMs != null
+          ? `${market.clock.driftMs > 0 ? "+" : ""}${Math.round(market.clock.driftMs)}ms vs ${market.clock.source ?? "upstream"}`
+          : "waktu server upstream tidak terbaca",
     },
   ];
   return { overall: overallHealth(items.map((item) => item.status)), items };

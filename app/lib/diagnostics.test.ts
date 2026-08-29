@@ -1,6 +1,87 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMarketDiagnostics, buildContextDiagnostics } from "./diagnostics";
+import {
+  buildContextDiagnostics, buildMarketDiagnostics, buildPriceDiagnostics,
+  PAYLOAD_STALE_MS, summarizeDataHealth,
+} from "./diagnostics";
+
+const healthyMarket = (now: number) => buildMarketDiagnostics({
+  now,
+  expectedCoins: ["BTC", "ETH"],
+  rows: [{ coin: "BTC", candleClosedAt: now - 60_000 }, { coin: "ETH", candleClosedAt: now - 60_000 }],
+  api: { requests: 10, succeeded: 10, failed: 0, rateLimited: 0 },
+  historyWrite: { status: "SKIPPED", added: 0 },
+  serverTimeMs: now,
+});
+const healthyContext = (now: number) => buildContextDiagnostics({
+  now,
+  expectedCoins: ["BTC"],
+  values: [{ coin: "BTC", funding: 0.01, oi_chg: 1, ls_ratio: 1, taker: 1 }],
+  api: { requests: 4, succeeded: 4, failed: 0, rateLimited: 0 },
+});
+const healthyPrice = (now: number) => buildPriceDiagnostics({
+  now, expectedCoins: ["BTC"], prices: { BTC: 60000 }, sourceTs: now - 500,
+  api: { requests: 1, succeeded: 1, failed: 0, rateLimited: 0 },
+});
+
+const rowOf = (summary: ReturnType<typeof summarizeDataHealth>, key: string) =>
+  summary.items.find((item) => item.key === key)!;
+
+test("a quiet market with nothing new to log reads OK, not UNKNOWN", () => {
+  const now = 1_800_000_000_000;
+  const summary = summarizeDataHealth({
+    market: healthyMarket(now), context: healthyContext(now), price: healthyPrice(now), now,
+  });
+  assert.equal(rowOf(summary, "history").status, "OK");
+  assert.equal(rowOf(summary, "history").detail, "tidak ada sinyal baru untuk dicatat");
+  assert.equal(summary.overall, "OK");
+});
+
+test("a source that stopped answering goes STALE instead of keeping its last good status", () => {
+  const now = 1_800_000_000_000;
+  const market = healthyMarket(now);
+  const later = now + PAYLOAD_STALE_MS.market + 1;
+  const summary = summarizeDataHealth({
+    market, context: healthyContext(later), price: healthyPrice(later), now: later,
+  });
+  for (const key of ["candle", "api", "history", "clock"]) {
+    assert.equal(rowOf(summary, key).status, "STALE", key);
+    assert.match(rowOf(summary, key).detail, /berhenti menjawab/);
+  }
+  assert.equal(summary.overall, "BAD");
+});
+
+test("a fresh but half-empty mark price feed is not reported healthy", () => {
+  const now = 1_800_000_000_000;
+  const price = buildPriceDiagnostics({
+    now, expectedCoins: ["BTC", "ETH", "SOL"], prices: { BTC: 60000 }, sourceTs: now - 200,
+    api: { requests: 1, succeeded: 1, failed: 0, rateLimited: 0 },
+  });
+  // The exchange stamp is fresh, so freshness alone would have said OK.
+  assert.equal(price.feed.status, "OK");
+  const summary = summarizeDataHealth({ market: healthyMarket(now), context: healthyContext(now), price, now });
+  assert.equal(rowOf(summary, "price").status, "DEGRADED");
+  assert.match(rowOf(summary, "price").detail, /hilang ETH, SOL/);
+});
+
+test("a 502 mark price answer is BAD rather than merely unknown", () => {
+  const now = 1_800_000_000_000;
+  const price = buildPriceDiagnostics({
+    now, expectedCoins: ["BTC", "ETH"], prices: {}, sourceTs: null,
+    api: { requests: 1, succeeded: 0, failed: 1, rateLimited: 0 },
+  });
+  const summary = summarizeDataHealth({ market: healthyMarket(now), context: healthyContext(now), price, now });
+  assert.equal(rowOf(summary, "price").status, "BAD");
+  assert.equal(summary.overall, "BAD");
+});
+
+test("a source that never answered still reads UNKNOWN, never OK", () => {
+  const now = 1_800_000_000_000;
+  const summary = summarizeDataHealth({ market: null, context: null, price: null, now });
+  assert.equal(summary.overall, "UNKNOWN");
+  assert.deepEqual(summary.items.map((item) => item.status), Array(6).fill("UNKNOWN"));
+  assert.match(rowOf(summary, "candle").detail, /menunggu/);
+});
 
 test("market diagnostics report aligned latest candle, partial API failure, and failed history write", () => {
   const now = 1_800_002_000_000;

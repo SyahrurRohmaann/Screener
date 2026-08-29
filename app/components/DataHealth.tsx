@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 import { summarizeDataHealth } from "../lib/diagnostics";
 
@@ -27,7 +27,14 @@ export default function DataHealth({ market, context, price }: {
   price: PriceDiagnostics | null;
 }) {
   const [open, setOpen] = useState(false);
-  const summary = useMemo(() => summarizeDataHealth({ market, context, price }), [market, context, price]);
+  // Staleness is a function of elapsed time, so the panel needs its own clock: if a
+  // route stops answering, no new payload arrives to trigger a re-render.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, []);
+  const summary = useMemo(() => summarizeDataHealth({ market, context, price, now }), [market, context, price, now]);
   const tone = TONE[summary.overall] ?? "hUnknown";
 
   return <section className={`health ${tone}`} aria-label="Kesehatan data">

@@ -542,13 +542,23 @@ membedakannya. Klik judulnya untuk buka rincian enam baris:
 | **CANDLE 30M** | umur candle tutup terakhir + apakah semua coin ada di candle yang sama | umur >65 menit, atau timestamp antar coin beda (`MISALIGNED`) |
 | **BINANCE API** | jumlah panggilan sukses / gagal / kena rate-limit | ada 429/418 (`RATE_LIMITED`), atau semua gagal (`DOWN`) |
 | **KONTEKS DERIVATIF** | berapa field funding/OI/LS/taker yang benar-benar terisi | tidak ada satu pun field terisi |
-| **MARK PRICE** | umur harga dihitung dari **stempel waktu Binance**, bukan waktu respons | stempel >15 detik (`STALE`) |
+| **MARK PRICE** | umur harga dari **stempel waktu Binance** (bukan waktu respons), digabung dengan cakupan coin dan status API | stempel >15 detik, coin bolong, atau feed mati (502) |
 | **TULIS HISTORY** | apakah `signals.jsonl` berhasil ditulis | volume read-only / penuh → sinyal tidak tercatat |
-| **CLOCK DRIFT** | selisih jam server lo vs jam Binance | selisih >10 detik (umur sinyal jadi salah) |
+| **CLOCK DRIFT** | selisih jam server lo vs jam Binance, diukur tepat di sekitar respons `/fapi/v1/time` dan dikoreksi setengah waktu perjalanan | selisih >10 detik (umur sinyal jadi salah) |
 
 Status yang mungkin: `OK`, `DEGRADED` (sebagian gagal), `STALE`/`BAD`/`DOWN`
 (jangan dipakai untuk keputusan), dan `UNKNOWN`. **`UNKNOWN` bukan berarti aman** —
 artinya sumber itu belum menjawab sama sekali.
+
+Dua hal yang sengaja dibedakan, karena gampang tertukar:
+
+- **"Tidak ada sinyal baru untuk dicatat" itu `OK`, bukan `UNKNOWN`.** Market sepi
+  adalah keadaan yang diketahui baik. `UNKNOWN` disimpan khusus untuk sumber yang
+  betul-betul belum menjawab.
+- **Payload yang berhenti diperbarui jadi `STALE`, bukan tetap hijau.** Kalau sesi lo
+  kedaluwarsa atau route-nya error, dashboard menahan data terakhir di layar. Tanpa
+  penjagaan ini, panel bakal terus menampilkan status sehat dari sumber yang sudah
+  diam berjam-jam. Batasnya 95 detik untuk market/konteks dan 30 detik untuk harga.
 
 Status keseluruhan di judul selalu mengambil yang paling buruk dari enam baris itu.
 
