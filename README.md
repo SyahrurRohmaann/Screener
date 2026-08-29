@@ -21,6 +21,9 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
   candles, and scored for win rate, expectancy (gross and net of fees), profit factor,
   and max drawdown — broken down by score, side, mode, and coin
 - Funding, open interest change, long/short ratio, and taker ratio
+- Data health panel: per-source status for candles, upstream API calls, derivatives
+  context, mark price freshness, history writes, and clock drift — a partial upstream
+  failure is shown as DEGRADED/STALE instead of silently looking like a calm market
 - Responsive dark trading terminal UI
 - Automatic refresh every 60 seconds and manual refresh button
 - No API key required for the public Binance endpoints
@@ -122,18 +125,30 @@ app/api/market/route.ts
   -> Binance Futures public REST API
   -> EMA / RSI / SMA(MAVOL) / candle calculations on closed 30m candles
   -> JSON response
+  -> `diagnostics`: candle age/alignment, upstream call tally, history write
+     outcome, and clock drift against `/fapi/v1/time`
 
 app/api/candles/route.ts
   -> closed 30m candles + EMA50 / RSI14 / MAVOL overlays for the chart
 
 app/api/context/route.ts
   -> funding, open interest, long/short and taker ratios
+  -> `diagnostics`: upstream call tally + field coverage
+
+app/api/price/route.ts
+  -> mark price fallback poll (single premiumIndex call)
+  -> `diagnostics`: feed age from the exchange stamp, coverage, call tally
+     (also returned on a 502 so the UI can tell DOWN from "no answer")
 
 app/api/history/route.ts
   -> replays logged signals against closed 30m candles and aggregates statistics
 
 app/lib/store.ts      -> append-only JSONL signal log
 app/lib/evaluate.ts   -> outcome replay + statistics
+app/lib/health.ts     -> pure threshold classifiers (age, API, alignment, clock)
+app/lib/diagnostics.ts-> per-route diagnostics builders + dashboard summary
+app/lib/api-counter.ts-> upstream success/failure/rate-limit tally per request
+app/components/DataHealth.tsx -> collapsible data health panel
 
 app/api/ranking/{preview,snapshot,history}/route.ts
 app/lib/ranking*.ts, portfolio.ts, forward-stats.ts

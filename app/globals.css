@@ -70,3 +70,35 @@
 +.decisionActions,.journal{border-top:1px solid var(--line);padding:34px 0 24px}.decisionHead{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}.decisionHead h2{font-size:15px;letter-spacing:2px;margin:0}.decisionHead span{display:block;font:10px 'DM Mono';color:var(--muted);line-height:1.8;margin-top:8px}.decisionCards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:20px}.decisionSignal{border:1px solid var(--line);padding:12px;background:var(--panel)}.decisionSignal>b{font:11px 'DM Mono';display:block;margin-bottom:10px}.decisionSignal>div{display:flex;gap:6px;flex-wrap:wrap}.decisionSignal button{font-size:8px;padding:7px}.decisionDone{font:8px 'DM Mono';color:var(--green)}.decisionMessage,.journalEmpty{font:10px 'DM Mono';color:var(--muted);margin:14px 0 0}.journalFilters{display:flex;gap:8px}.journalFilters select,.decisionField select,.decisionFields input,.decisionField textarea{background:#0c1016;border:1px solid var(--line);color:var(--text);font:10px 'DM Mono';padding:9px}.journalTableWrap{margin-top:20px;overflow:auto}.journal td small{color:var(--muted);line-height:1.6}.decisionModal{width:min(620px,100%)}.decisionFields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.decisionFields label span,.decisionField span{display:block;font:9px 'DM Mono';color:var(--muted);margin-bottom:7px}.decisionFields input,.decisionField select,.decisionField textarea{width:100%}.decisionField{display:block;margin-top:14px}.decisionField textarea{min-height:92px;resize:vertical}.decisionWarning{font:9px 'DM Mono';color:var(--gold);line-height:1.7}.decisionSave{color:var(--green);border-color:#2c6b50}.decisionSave:disabled{opacity:.5}@media(max-width:700px){.decisionCards{grid-template-columns:1fr}.journalFilters{width:100%;overflow:auto}.decisionFields{grid-template-columns:1fr}}
 .volCtl{display:inline-flex;align-items:center;gap:7px;font:8px 'DM Mono';color:var(--muted)}
 .volCtl input[type=range]{width:74px;accent-color:#65a9ff}.volCtl b{color:#cbd2dc}
+
+/* --- Panel kesehatan data --- */
+.health{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.health.hOk{border-color:rgba(85,214,154,.35)}
+.health.hWarn{border-color:rgba(233,189,112,.45)}
+.health.hBad{border-color:rgba(255,100,117,.5)}
+.healthHead{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border:0;background:transparent;text-align:left;cursor:pointer}
+.healthHead b{font:10px 'DM Mono';letter-spacing:.1em;color:#e7ecf3}
+.healthHead small{font:9px 'DM Mono';color:var(--muted);flex:1;min-width:180px;line-height:1.6}
+.healthHead i{font-style:normal;font:8px 'DM Mono';color:var(--muted);flex:none}
+.healthDot{width:8px;height:8px;border-radius:50%;flex:none;background:#6d7683}
+.healthDot.hOk{background:var(--green);box-shadow:0 0 10px rgba(85,214,154,.8)}
+.healthDot.hWarn{background:var(--gold);box-shadow:0 0 10px rgba(233,189,112,.7)}
+.healthDot.hBad{background:var(--red);box-shadow:0 0 10px rgba(255,100,117,.75)}
+.healthDot.hUnknown{background:#6d7683}
+.healthBody{border-top:1px solid var(--line);padding:12px 14px 14px}
+.healthList{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.healthList li{display:grid;grid-template-columns:150px 96px 1fr;align-items:baseline;gap:10px;
+ padding:7px 9px;border-left:2px solid var(--line);background:rgba(255,255,255,.02)}
+.healthList li.hOk{border-left-color:var(--green)}
+.healthList li.hWarn{border-left-color:var(--gold)}
+.healthList li.hBad{border-left-color:var(--red)}
+.healthList li.hUnknown{border-left-color:#6d7683;border-left-style:dashed}
+.hLabel{font:9px 'DM Mono';letter-spacing:.08em;color:#cbd2dc}
+.hStatus{font:9px 'DM Mono';letter-spacing:.06em}
+.healthList li.hOk .hStatus{color:var(--green)}
+.healthList li.hWarn .hStatus{color:var(--gold)}
+.healthList li.hBad .hStatus{color:var(--red)}
+.healthList li.hUnknown .hStatus{color:var(--muted)}
+.hDetail{font:9px 'DM Mono';line-height:1.6;color:var(--muted);word-break:break-word}
+.healthNote{margin:12px 0 0;font:8px 'DM Mono';line-height:1.75;color:var(--muted);max-width:900px}
+@media(max-width:700px){.healthList li{grid-template-columns:1fr;gap:3px}.healthHead small{display:none}}

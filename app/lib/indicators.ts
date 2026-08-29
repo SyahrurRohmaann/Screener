@@ -3,15 +3,26 @@ export type Market = { o: number[]; h: number[]; l: number[]; c: number[]; v: nu
 
 export const BINANCE = process.env.BINANCE_FAPI_URL ?? "https://fapi.binance.com";
 
-export async function getJson<T>(path: string): Promise<T | null> {
+/**
+ * Optional tally so a route can report how many upstream calls actually
+ * succeeded. Without it, a swallowed 429 is indistinguishable from real data.
+ */
+export type UpstreamCounter = { record(outcome: { ok: boolean; status: number | null }): void };
+
+export async function getJson<T>(path: string, counter?: UpstreamCounter): Promise<T | null> {
   try {
     const response = await fetch(`${BINANCE}${path}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
       headers: { accept: "application/json" },
     });
+    counter?.record({ ok: response.ok, status: response.status });
     return response.ok ? await response.json() as T : null;
-  } catch { return null; }
+  } catch {
+    // Timeout, DNS failure, or a body that is not JSON — all upstream failures.
+    counter?.record({ ok: false, status: null });
+    return null;
+  }
 }
 
 export function ema(values: number[], period: number) {
@@ -61,8 +72,8 @@ export function atr(data: Market, period = 14) {
 }
 
 /** Only closed candles: Binance returns the in-progress candle as the last element. */
-export async function candles(symbol: string, interval: string, limit: number): Promise<Market | null> {
-  const data = await getJson<Candle[]>(`/fapi/v1/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`);
+export async function candles(symbol: string, interval: string, limit: number, counter?: UpstreamCounter): Promise<Market | null> {
+  const data = await getJson<Candle[]>(`/fapi/v1/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`, counter);
   if (!data?.length) return null;
   const closed = data.filter((x) => Number(x[6]) <= Date.now());
   return {

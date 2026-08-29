@@ -8,8 +8,10 @@ import RiskCalculator from "./RiskCalculator";
 import AccountPanel from "./auth/AccountPanel";
 import SignalAlerts from "./SignalAlerts";
 import DecisionJournal, { openSignalDecision } from "./DecisionJournal";
+import DataHealth from "./DataHealth";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
+import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
@@ -39,6 +41,11 @@ export default function Dashboard() {
   const [feed, setFeed] = useState<"WS" | "POLL" | "OFF">("OFF");
   const [tick, setTick] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Diagnostics per source. They stay null until the matching route answers, so the
+  // panel shows UNKNOWN rather than implying a healthy source that never replied.
+  const [marketHealth, setMarketHealth] = useState<MarketDiagnostics | null>(null);
+  const [contextHealth, setContextHealth] = useState<ContextDiagnostics | null>(null);
+  const [priceHealth, setPriceHealth] = useState<PriceDiagnostics | null>(null);
 
   // /api/market fans out to ~60 Binance calls. At a 30s cadence a slow response
   // could still be in flight when the next tick fires, so requests never overlap.
@@ -53,6 +60,7 @@ export default function Dashboard() {
       if (!response.ok) return;
       const data = await response.json();
       setRows(data.rows ?? demo);
+      setMarketHealth(data.diagnostics ?? null);
       setUpdated(new Date());
     } catch { /* keep the previous rows rather than blanking the screen */ }
     finally { inFlight.current = false; setLoading(false); }
@@ -65,8 +73,9 @@ export default function Dashboard() {
       try {
         const response = await fetch("/api/context", { cache: "no-store" });
         if (!response.ok) return;
-        const data = await response.json();
-        setRows((cur) => cur.map((r) => ({ ...r, ...(data[r.coin] ?? {}) })));
+        const { diagnostics, ...byCoin } = await response.json();
+        setRows((cur) => cur.map((r) => ({ ...r, ...(byCoin[r.coin] ?? {}) })));
+        setContextHealth(diagnostics ?? null);
       } catch {}
     }, CONTEXT_REFRESH_MS);
 
@@ -87,10 +96,12 @@ export default function Dashboard() {
       if (closed || Date.now() - lastFrame < 5000) return;
       try {
         const response = await fetch("/api/price", { cache: "no-store" });
-        if (!response.ok) return;
         const data = await response.json();
+        // A 502 still carries diagnostics, so record them before bailing out.
+        if (!response.ok) { if (!closed) setPriceHealth(data?.diagnostics ?? null); return; }
         if (closed || Date.now() - lastFrame < 5000) return;
         applyPrices(data.prices ?? {});
+        setPriceHealth(data.diagnostics ?? null);
         setFeed("POLL");
       } catch {}
     };
@@ -153,6 +164,7 @@ export default function Dashboard() {
     </header>
 
     <AccountPanel />
+    <DataHealth market={marketHealth} context={contextHealth} price={priceHealth} />
     <SignalAlerts rows={rows} onOpenSignal={setChartCoin} />
 
     <section className="hero">

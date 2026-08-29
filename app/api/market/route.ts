@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { atr, candles, ema, getJson, rsi, sma, type Market } from "../../lib/indicators";
 import { recordSignals, type SignalRecord } from "../../lib/store";
 import { guard } from "../../lib/session";
+import { createApiCounter, type ApiCounter } from "../../lib/api-counter";
+import { buildMarketDiagnostics } from "../../lib/diagnostics";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,12 +14,12 @@ const COINS = (process.env.SCREENER_COINS ?? "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,
 // sehingga nilai penyaringnya hilang. Default dinaikkan ke 4 = butuh konfluensi nyata.
 const MIN_SCORE = Number(process.env.SCREENER_MIN_SCORE ?? 4);
 
-async function microstructure(symbol: string) {
+async function microstructure(symbol: string, counter: ApiCounter) {
   const [premium, oi, ls, taker] = await Promise.all([
-    getJson<{ lastFundingRate: string; markPrice: string }>(`/fapi/v1/premiumIndex?symbol=${symbol}USDT`),
-    getJson<Array<{ sumOpenInterest: string }>>(`/futures/data/openInterestHist?symbol=${symbol}USDT&period=15m&limit=5`),
-    getJson<Array<{ longShortRatio: string }>>(`/futures/data/globalLongShortAccountRatio?symbol=${symbol}USDT&period=15m&limit=1`),
-    getJson<Array<{ buySellRatio: string }>>(`/futures/data/takerlongshortRatio?symbol=${symbol}USDT&period=15m&limit=1`),
+    getJson<{ lastFundingRate: string; markPrice: string }>(`/fapi/v1/premiumIndex?symbol=${symbol}USDT`, counter),
+    getJson<Array<{ sumOpenInterest: string }>>(`/futures/data/openInterestHist?symbol=${symbol}USDT&period=15m&limit=5`, counter),
+    getJson<Array<{ longShortRatio: string }>>(`/futures/data/globalLongShortAccountRatio?symbol=${symbol}USDT&period=15m&limit=1`, counter),
+    getJson<Array<{ buySellRatio: string }>>(`/futures/data/takerlongshortRatio?symbol=${symbol}USDT&period=15m&limit=1`, counter),
   ]);
   const first = oi?.[0] ? Number(oi[0].sumOpenInterest) : NaN;
   const last = oi?.at(-1) ? Number(oi.at(-1)!.sumOpenInterest) : NaN;
@@ -55,8 +57,8 @@ function pattern(data: Market, i: number, bullish: boolean) {
                  : (engulf || hammer || invertedHammer || eveningStar || darkCloud);
 }
 
-async function analyze(coin: string) {
-  const [m30, m1h] = await Promise.all([candles(coin, "30m", 200), candles(coin, "1h", 100)]);
+async function analyze(coin: string, counter: ApiCounter) {
+  const [m30, m1h] = await Promise.all([candles(coin, "30m", 200, counter), candles(coin, "1h", 100, counter)]);
   if (!m30 || !m1h) return { coin, error: "data unavailable" };
   const i = m30.c.length - 1;
   const e30 = ema(m30.c, 50), e1h = ema(m1h.c, 50), r = rsi(m30.c), mv5 = sma(m30.v, 5), mv14 = sma(m30.v, 14);
@@ -126,7 +128,7 @@ async function analyze(coin: string) {
     signal_closed_at: closedAt, age_min: ageMin,
     atr: Number.isFinite(a) ? a : null, atr_pct: atrPct,
     plan, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", timeframe: "30m",
-    ...await microstructure(coin),
+    ...await microstructure(coin, counter),
   };
 }
 
@@ -134,7 +136,13 @@ export async function GET() {
   const denied = await guard();
   if (denied) return denied;
 
-  const rows = await Promise.all(COINS.map(analyze));
+  const counter = createApiCounter();
+  // Server time is fetched alongside the scan so clock drift is measured against the
+  // exchange that stamps the candles, not against whatever the container clock says.
+  const [rows, serverTime] = await Promise.all([
+    Promise.all(COINS.map((coin) => analyze(coin, counter))),
+    getJson<{ serverTime: number }>("/fapi/v1/time", counter),
+  ]);
 
   // Log every signal once per closed candle so performance can be audited later.
   const now = Date.now();
@@ -152,7 +160,22 @@ export async function GET() {
       trend_1h: r.trend_1h, atr_pct: r.atr_pct, reasons: r.reasons,
     }];
   });
-  const logged = await recordSignals(candidates);
+  const historyWrite = await recordSignals(candidates);
 
-  return NextResponse.json({ source: "binance-futures", ts: now, min_score: MIN_SCORE, logged: logged.added, rows });
+  const diagnostics = buildMarketDiagnostics({
+    now,
+    expectedCoins: COINS,
+    rows: rows.flatMap((r) => ("signal_closed_at" in r && Number.isFinite(r.signal_closed_at)
+      ? [{ coin: r.coin, candleClosedAt: r.signal_closed_at }]
+      : [])),
+    api: counter.counts(),
+    historyWrite,
+    serverTimeMs: serverTime && Number.isFinite(serverTime.serverTime) ? serverTime.serverTime : null,
+  });
+
+  return NextResponse.json({
+    source: "binance-futures", ts: now, min_score: MIN_SCORE,
+    logged: historyWrite.added, history_write: historyWrite,
+    diagnostics, rows,
+  });
 }

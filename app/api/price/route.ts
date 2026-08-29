@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { BINANCE } from "../../lib/indicators";
 import { guard } from "../../lib/session";
+import { createApiCounter } from "../../lib/api-counter";
+import { buildPriceDiagnostics } from "../../lib/diagnostics";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,17 +17,30 @@ type Premium = { symbol: string; markPrice: string; time: number };
  * connects but never delivers frames. One unfiltered premiumIndex call returns
  * every symbol, so polling this stays a single upstream request regardless of
  * how many coins are tracked.
+ *
+ * A 502 still carries diagnostics: the dashboard must be able to tell "the feed is
+ * down" apart from "the request never completed".
  */
 export async function GET() {
   const denied = await guard();
   if (denied) return denied;
+
+  const counter = createApiCounter();
+  const failed = (reason: "upstream" | "unreachable") => NextResponse.json({
+    error: reason,
+    prices: {},
+    diagnostics: buildPriceDiagnostics({
+      now: Date.now(), expectedCoins: COINS, prices: {}, sourceTs: null, api: counter.counts(),
+    }),
+  }, { status: 502 });
 
   try {
     const response = await fetch(`${BINANCE}/fapi/v1/premiumIndex`, {
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) return NextResponse.json({ error: "upstream" }, { status: 502 });
+    counter.record({ ok: response.ok, status: response.status });
+    if (!response.ok) return failed("upstream");
     const all = (await response.json()) as Premium[];
 
     const wanted = new Set(COINS.map((c) => `${c}USDT`));
@@ -39,8 +54,15 @@ export async function GET() {
         stamp = Math.max(stamp, entry.time ?? 0);
       }
     }
-    return NextResponse.json({ ts: stamp || Date.now(), prices });
+    const now = Date.now();
+    // Freshness is judged on the exchange stamp, so a frozen-but-fast response is
+    // reported as STALE instead of looking healthy.
+    const diagnostics = buildPriceDiagnostics({
+      now, expectedCoins: COINS, prices, sourceTs: stamp || null, api: counter.counts(),
+    });
+    return NextResponse.json({ ts: stamp || now, prices, diagnostics });
   } catch {
-    return NextResponse.json({ error: "unreachable" }, { status: 502 });
+    counter.record({ ok: false, status: null });
+    return failed("unreachable");
   }
 }

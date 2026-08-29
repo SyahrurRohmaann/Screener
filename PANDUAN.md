@@ -495,6 +495,8 @@ Dari atas ke bawah:
 ┌──────────────────────────────────────────────────┐
 │ ◎ SCREENER            ● LIVE  [↻ REFRESH]        │  ← header
 ├──────────────────────────────────────────────────┤
+│ ● DATA HEALTH · OK               [RINCIAN ▼]     │  ← kesehatan data
+├──────────────────────────────────────────────────┤
 │ Read the market.              02  ACTIVE SETUPS  │  ← hero + ringkasan
 │ Trade with context.           10  MARKETS        │
 ├──────────────────────────────────────────────────┤
@@ -515,6 +517,30 @@ Angka `00` itu normal dan sehat — artinya nggak ada setup yang lolos filter.
 Kalau tiap saat ada 8–9 setup, berarti threshold-nya kelonggaran.
 
 **Tombol ↻ REFRESH** memaksa hitung ulang sekarang tanpa nunggu 30 detik.
+
+---
+
+### Panel DATA HEALTH
+
+Semua angka di layar ini berasal dari puluhan panggilan ke API publik Binance. Kalau
+sebagian gagal, hasilnya **tetap tampil** — cuma dihitung dari data yang bolong. Itu
+bahaya: market yang sepi dan feed yang rusak kelihatan sama. Panel ini yang
+membedakannya. Klik judulnya untuk buka rincian enam baris:
+
+| Baris | Artinya | Kapan jadi merah |
+|---|---|---|
+| **CANDLE 30M** | umur candle tutup terakhir + apakah semua coin ada di candle yang sama | umur >65 menit, atau timestamp antar coin beda (`MISALIGNED`) |
+| **BINANCE API** | jumlah panggilan sukses / gagal / kena rate-limit | ada 429/418 (`RATE_LIMITED`), atau semua gagal (`DOWN`) |
+| **KONTEKS DERIVATIF** | berapa field funding/OI/LS/taker yang benar-benar terisi | tidak ada satu pun field terisi |
+| **MARK PRICE** | umur harga dihitung dari **stempel waktu Binance**, bukan waktu respons | stempel >15 detik (`STALE`) |
+| **TULIS HISTORY** | apakah `signals.jsonl` berhasil ditulis | volume read-only / penuh → sinyal tidak tercatat |
+| **CLOCK DRIFT** | selisih jam server lo vs jam Binance | selisih >10 detik (umur sinyal jadi salah) |
+
+Status yang mungkin: `OK`, `DEGRADED` (sebagian gagal), `STALE`/`BAD`/`DOWN`
+(jangan dipakai untuk keputusan), dan `UNKNOWN`. **`UNKNOWN` bukan berarti aman** —
+artinya sumber itu belum menjawab sama sekali.
+
+Status keseluruhan di judul selalu mengambil yang paling buruk dari enam baris itu.
 
 ---
 
@@ -1675,6 +1701,18 @@ curl -s http://127.0.0.1:8643/api/market
   "ts": 1787839200000,
   "min_score": 4,
   "logged": 1,
+  "history_write": { "status": "OK", "added": 1 },
+  "diagnostics": {
+    "overall": "OK",
+    "generatedAt": 1787839200000,
+    "candle": {
+      "status": "OK", "latestClosedAt": 1787839199999, "ageMs": 720000,
+      "interval": "30m", "alignment": "OK", "availableCoins": 10, "expectedCoins": 10
+    },
+    "api": { "status": "OK", "requests": 61, "succeeded": 61, "failed": 0, "rateLimited": 0 },
+    "historyWrite": { "status": "OK", "added": 1 },
+    "clock": { "status": "OK", "driftMs": 84, "source": "binance-time" }
+  },
   "rows": [{
     "coin": "AVAX",
     "price": 7.4410,
@@ -1703,6 +1741,13 @@ curl -s http://127.0.0.1:8643/api/market
 
 `logged` = berapa sinyal baru dicatat ke history di panggilan ini.
 
+`history_write.status` membedakan tiga hal yang dulu sama-sama tampak `logged: 0`:
+`OK` (tertulis), `SKIPPED` (tidak ada sinyal baru), `ERROR` (gagal menulis —
+volume read-only atau penuh, jadi sinyal itu hilang dari history).
+
+`diagnostics.candle.missingCoins` hanya muncul kalau ada coin yang gagal diambil.
+`diagnostics.clock.driftMs` positif berarti jam server lo lebih cepat dari Binance.
+
 ### GET /api/context
 
 Cuma data microstructure. Ringan, dipanggil tiap 30 detik.
@@ -1713,9 +1758,20 @@ curl -s http://127.0.0.1:8643/api/context
 
 ```json
 {
-  "AVAX": { "funding": 0.010, "oi_chg": 0.24, "ls_ratio": 1.35, "taker": 1.18 }
+  "AVAX": { "funding": 0.010, "oi_chg": 0.24, "ls_ratio": 1.35, "taker": 1.18 },
+  "diagnostics": {
+    "status": "OK",
+    "observedAt": 1787839200000,
+    "ageMs": 0,
+    "api": { "status": "OK", "requests": 40, "succeeded": 40, "failed": 0, "rateLimited": 0 },
+    "coverage": { "availableFields": 40, "expectedFields": 40, "availableCoins": 10, "expectedCoins": 10 }
+  }
 }
 ```
+
+`diagnostics` adalah key khusus, bukan simbol coin. `coverage` menghitung field yang
+benar-benar terisi — kalau funding null karena panggilan gagal, angkanya turun dan
+statusnya jadi `DEGRADED`, bukan diam-diam dianggap sukses.
 
 ### GET /api/price
 
@@ -1729,9 +1785,21 @@ curl -s http://127.0.0.1:8643/api/price
 ```json
 {
   "ts": 1787904249002,
-  "prices": { "BTC": 79797.0, "ETH": 2501.74, "AVAX": 7.4282 }
+  "prices": { "BTC": 79797.0, "ETH": 2501.74, "AVAX": 7.4282 },
+  "diagnostics": {
+    "status": "OK",
+    "observedAt": 1787904249500,
+    "feed": { "status": "OK", "sourceTs": 1787904249002, "ageMs": 498, "transport": "rest-poll" },
+    "api": { "status": "OK", "requests": 1, "succeeded": 1, "failed": 0, "rateLimited": 0 },
+    "coverage": { "availableCoins": 10, "expectedCoins": 10 }
+  }
 }
 ```
+
+`feed.ageMs` dihitung dari `sourceTs` (stempel Binance), bukan dari waktu respons —
+jawaban yang datang cepat tapi stempelnya beku tetap dilaporkan `STALE`. Saat upstream
+gagal, endpoint ini membalas `502` yang **tetap membawa `diagnostics`**, supaya
+dashboard bisa membedakan "feed mati" dari "request tidak pernah selesai".
 
 Endpoint ini memakai `premiumIndex` **tanpa filter symbol**, jadi satu request
 ke Binance mengembalikan semua market sekaligus — biaya upstream-nya tetap
