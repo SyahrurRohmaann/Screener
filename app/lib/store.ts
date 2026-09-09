@@ -63,7 +63,7 @@ export async function readHistory(): Promise<SignalRecord[]> {
  * rejected the write" so /api/market can report a broken history mount instead of
  * reporting `logged: 0` that looks exactly like a quiet market.
  */
-export async function recordSignals(candidates: SignalRecord[]): Promise<HistoryWriteOutcome> {
+export async function recordSignals(candidates: SignalRecord[]): Promise<HistoryWriteOutcome & { addedKeys?: string[] }> {
   if (!candidates.length) return { status: "SKIPPED", added: 0 };
   try {
     if (!seen) seen = new Set((await loadAll()).map((r) => r.key));
@@ -73,7 +73,7 @@ export async function recordSignals(candidates: SignalRecord[]): Promise<History
     await mkdir(dirname(target), { recursive: true });
     await appendFile(target, fresh.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
     for (const r of fresh) seen!.add(r.key);
-    return { status: "OK", added: fresh.length };
+    return { status: "OK", added: fresh.length, addedKeys: fresh.map((r) => r.key) };
   } catch {
     // Read-only volume or disk pressure must never break the live screener.
     return { status: "ERROR", added: 0, error: "write_failed" };

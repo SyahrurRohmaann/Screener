@@ -8,6 +8,7 @@ import {
   newSignals, notifiable, signalKey, summarize, trimSeen,
 } from "../lib/notify";
 import { audioSupported, chimeForSignal, chimeForStatus, clampVolume, playChime, unlockAudio } from "../lib/chime";
+import PushOptIn from "./PushOptIn";
 
 const SEEN_STORE = "screener_seen_signals";
 const INBOX_STORE = "screener_signal_inbox_v1";
@@ -35,6 +36,7 @@ export default function SignalAlerts({
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [pushActive, setPushActive] = useState<boolean | null>(null);
   const [alertPrefs, setAlertPrefs] = useState<AlertPrefs>(defaultAlertPrefs);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sound, setSound] = useState(false);
@@ -119,7 +121,7 @@ export default function SignalAlerts({
     // Sound first: it is the part that reaches you when you are not looking.
     if (sound) for (const r of fresh) playChime(chimeForSignal(r.sig!), volume);
 
-    if (enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (enabled && pushActive === false && typeof Notification !== "undefined" && Notification.permission === "granted") {
       for (const r of fresh) {
         try {
           new Notification(`Sinyal baru: ${r.coin} ${r.sig}`, {
@@ -128,7 +130,7 @@ export default function SignalAlerts({
         } catch {}
       }
     }
-  }, [rows, enabled, sound, volume]);
+  }, [rows, enabled, pushActive, sound, volume]);
 
   useEffect(() => {
     if (!hydrated.current) return;
@@ -208,6 +210,7 @@ export default function SignalAlerts({
 
   return <>
     <div className="notifBar">
+      <PushOptIn onActive={setPushActive} />
       <button
         className={enabled ? "notifOn" : ""}
         onClick={toggle}

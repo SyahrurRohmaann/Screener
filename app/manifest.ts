@@ -5,8 +5,8 @@ import type { MetadataRoute } from "next";
  * the shape is type-checked at build time.
  *
  * `display: standalone` is what makes the installed app drop the browser address bar.
- * Note that installing does NOT grant background notifications — that needs Web Push,
- * which is not implemented yet.
+ * Installing does NOT grant background notifications; Web Push requires a separate
+ * opt-in and configured server VAPID keys.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {

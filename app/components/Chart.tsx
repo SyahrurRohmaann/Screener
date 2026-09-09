@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { clampOffset, indexToX, percentageLabel, MAX_RIGHT_FRACTION, VISIBLE_BARS } from "../lib/chartView";
 import type { Bar, Plan, Row } from "../lib/format";
 import { levelPct, money, num, planEntry } from "../lib/format";
 
@@ -25,10 +26,15 @@ function polyline(bars: Bar[], pick: (b: Bar) => number | null, x: (i: number) =
 export default function Chart({ row, onClose }: Props) {
   const [bars, setBars] = useState<Bar[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [offsetPx, setOffsetPx] = useState(0);
+  const [pointerY, setPointerY] = useState<number | null>(null);
+  const drag = useRef<{ id: number; x: number } | null>(null);
+  const clipId = useId();
 
   useEffect(() => {
     let alive = true;
     setBars(null); setError(null);
+    setOffsetPx(0); setPointerY(null); drag.current = null;
     (async () => {
       try {
         const response = await fetch(`/api/candles?coin=${row.coin}`, { cache: "no-store" });
@@ -62,22 +68,29 @@ export default function Chart({ row, onClose }: Props) {
     const vMax = Math.max(...bars.map((b) => b.v), ...bars.map((b) => b.mavol14 ?? 0));
 
     const inner = W - PAD_L - PAD_R;
-    const step = inner / bars.length;
+    const visibleBars = Math.min(VISIBLE_BARS, bars.length);
+    const step = inner / visibleBars;
     const bodyW = Math.max(1.6, step * 0.62);
-    const x = (i: number) => PAD_L + step * (i + 0.5);
+    const offset = clampOffset(offsetPx, bars.length, visibleBars, step, inner * MAX_RIGHT_FRACTION);
+    const x = (i: number) => indexToX(i, bars.length, visibleBars, step, PAD_L, offset);
     const volTop = PRICE_H + GAP;
     const rsiTop = volTop + VOL_H + GAP;
 
     return {
-      plan, entry: planEntry(row), bodyW, x, pMin, pMax, vMax, volTop, rsiTop,
+      plan, entry: planEntry(row), bodyW, x, pMin, pMax, vMax, volTop, rsiTop, step, visibleBars, offset,
       yPrice: (v: number) => scale(v, pMin, pMax, 0, PRICE_H),
       yVol: (v: number) => scale(v, 0, vMax, volTop, VOL_H),
       yRsi: (v: number) => scale(v, 0, 100, rsiTop, RSI_H),
       height: rsiTop + RSI_H + 4,
     };
-  }, [bars, row]);
+  }, [bars, row, offsetPx]);
 
   const last = bars?.at(-1);
+  const crossPrice = view && pointerY != null ? view.pMax - pointerY / PRICE_H * (view.pMax - view.pMin) : null;
+  const crossPct = crossPrice == null ? null : percentageLabel(crossPrice, last?.c ?? row.price);
+  const pan = (delta: number) => {
+    if (view && bars) setOffsetPx((offset) => clampOffset(offset + delta, bars.length, view.visibleBars, view.step, (W - PAD_L - PAD_R) * MAX_RIGHT_FRACTION));
+  };
 
   return <div className="modalWrap" role="dialog" aria-label={`Chart ${row.coin}`}>
     <div className="modalBack" onClick={onClose} />
@@ -94,7 +107,45 @@ export default function Chart({ row, onClose }: Props) {
       {!bars && !error && <p className="chartMsg">Loading chart…</p>}
 
       {bars && view && <>
-        <svg className="chart" viewBox={`0 0 ${W} ${view.height}`} preserveAspectRatio="xMidYMid meet">
+        <div role="application" aria-label={`${row.coin} chart. Drag to pan; Left and Right arrows pan; Home resets.`} tabIndex={0}
+          onKeyDown={(event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+            event.preventDefault();
+            if (event.key === "Home") setOffsetPx(0);
+            else pan((event.key === "ArrowLeft" ? -1 : 1) * view.step * 5);
+          }}>
+        <svg className="chart" viewBox={`0 0 ${W} ${view.height}`} preserveAspectRatio="xMidYMid meet"
+          style={{ touchAction: "pan-y", cursor: "crosshair", transition: "none" }}
+          onPointerDown={(event) => {
+            if (event.button !== 0 || !event.isPrimary) return;
+            event.currentTarget.parentElement?.focus();
+            const matrix = event.currentTarget.getScreenCTM();
+            if (!matrix) return;
+            const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+            drag.current = { id: event.pointerId, x: point.x };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setPointerY(point.y >= 0 && point.y <= PRICE_H ? point.y : null);
+          }}
+          onPointerMove={(event) => {
+            const matrix = event.currentTarget.getScreenCTM();
+            if (!matrix) return;
+            const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+            setPointerY(point.y >= 0 && point.y <= PRICE_H ? point.y : null);
+            if (drag.current?.id === event.pointerId) {
+              pan(drag.current.x - point.x);
+              drag.current.x = point.x;
+            }
+          }}
+          onPointerUp={(event) => {
+            if (drag.current?.id !== event.pointerId) return;
+            drag.current = null;
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            if (event.pointerType !== "mouse") setPointerY(null);
+          }}
+          onPointerCancel={() => { drag.current = null; setPointerY(null); }}
+          onLostPointerCapture={() => { drag.current = null; }}
+          onPointerLeave={() => setPointerY(null)}>
+          <defs><clipPath id={clipId}><rect x={PAD_L} y={0} width={W - PAD_L - PAD_R} height={view.height} /></clipPath></defs>
           {[0, 0.25, 0.5, 0.75, 1].map((f) => {
             const price = view.pMin + (view.pMax - view.pMin) * (1 - f);
             const y = f * PRICE_H;
@@ -127,6 +178,7 @@ export default function Chart({ row, onClose }: Props) {
             </g>;
           })}
 
+          <g clipPath={`url(#${clipId})`}>
           {bars.map((b, i) => {
             const up = b.c >= b.o;
             const cx = view.x(i);
@@ -149,6 +201,7 @@ export default function Chart({ row, onClose }: Props) {
           <polyline className="lineEma" points={polyline(bars, (b) => b.ema50, view.x, view.yPrice)} />
           <polyline className="lineMv5" points={polyline(bars, (b) => b.mavol5, view.x, view.yVol)} />
           <polyline className="lineMv14" points={polyline(bars, (b) => b.mavol14, view.x, view.yVol)} />
+          </g>
 
           <text x={PAD_L + 2} y={view.volTop + 10} className="panelTag">VOLUME · MAVOL5/14</text>
 
@@ -159,9 +212,26 @@ export default function Chart({ row, onClose }: Props) {
               <text x={W - PAD_R + 6} y={y + 3} className="axis">{level}</text>
             </g>;
           })}
-          <polyline className="lineRsi" points={polyline(bars, (b) => b.rsi, view.x, view.yRsi)} />
+          <g clipPath={`url(#${clipId})`}>
+            <polyline className="lineRsi" points={polyline(bars, (b) => b.rsi, view.x, view.yRsi)} />
+          </g>
           <text x={PAD_L + 2} y={view.rsiTop + 10} className="panelTag">RSI14 · 30M</text>
+          {view.offset > 0 && <g pointerEvents="none">
+            <rect x={W - PAD_R - view.offset} y={0} width={view.offset} height={view.height} fill="currentColor" opacity={0.04} />
+            <text x={W - PAD_R - 4} y={PRICE_H - 8} textAnchor="end" className="axis">No candles yet</text>
+          </g>}
+          {pointerY != null && crossPrice != null && <g pointerEvents="none">
+            <line x1={PAD_L} x2={W - PAD_R} y1={pointerY} y2={pointerY} stroke={crossPct?.startsWith("-") ? "#ef4444" : "#22c55e"} strokeDasharray="4 3" />
+            <g transform={`translate(${W - PAD_R}, ${Math.max(0, Math.min(PRICE_H - 32, pointerY - 16))})`}>
+              <rect width={PAD_R} height={32} rx={3} fill="#111827" />
+              <text x={3} y={12} fontSize={10} fill={crossPct?.startsWith("-") ? "#ef4444" : "#22c55e"}>
+                <tspan>{money(crossPrice)}</tspan>
+                {crossPct && <tspan x={3} dy={13}>{crossPct}</tspan>}
+              </text>
+            </g>
+          </g>}
         </svg>
+        </div>
 
         <div className="legend">
           <span className="lg lg-ema">EMA50</span>

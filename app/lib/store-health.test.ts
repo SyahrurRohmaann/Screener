@@ -20,13 +20,16 @@ test("a successful append reports OK with the number of new records", async () =
   resetHistoryCache();
 
   const first = await recordSignals([record("BTC-1"), record("BTC-2")]);
-  assert.deepEqual(first, { status: "OK", added: 2 });
+  assert.deepEqual(first, { status: "OK", added: 2, addedKeys: ["BTC-1", "BTC-2"] });
 
   const again = await recordSignals([record("BTC-1")]);
   assert.deepEqual(again, { status: "SKIPPED", added: 0 });
 
   const raw = await readFile(join(dir, "signals.jsonl"), "utf8");
   assert.equal(raw.trim().split("\n").length, 2);
+  assert.deepEqual(await recordSignals([record("BTC-1"), record("BTC-3")]), {
+    status: "OK", added: 1, addedKeys: ["BTC-3"],
+  });
 });
 
 test("nothing to write is SKIPPED, not a silent success", async () => {

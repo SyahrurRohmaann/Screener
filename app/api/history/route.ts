@@ -3,6 +3,7 @@ import { evaluate, groupBy } from "../../lib/evaluate";
 import { analyzeHistory, type HistoryRange } from "../../lib/history-analytics";
 import { readHistory } from "../../lib/store";
 import { guard } from "../../lib/session";
+import { paginate } from "../../lib/history-paging";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,13 +13,16 @@ export async function GET(request: Request) {
   const denied = await guard();
   if (denied) return denied;
 
-  const rawRange = new URL(request.url).searchParams.get("range") ?? "30";
+  const params = new URL(request.url).searchParams;
+  const rawRange = params.get("range") ?? "30";
+  const { page, pageSize } = paginate(0, params.get("page"), params.get("pageSize"));
   const range: HistoryRange = ["30", "60", "90", "all"].includes(rawRange)
     ? rawRange as HistoryRange : "30";
   const records = await readHistory();
   if (!records.length) {
     return NextResponse.json({
       ts: Date.now(), empty: true,
+      page, pageSize, total: 0, total_pages: 0,
       note: "Belum ada sinyal tercatat. History terisi otomatis setiap /api/market menemukan setup baru.",
       range, cutoff: range === "all" ? null : Date.now() - Number(range) * 86_400_000,
       rows: [], stats: null, equity_curve: [], outcomes: [], holding: null,
@@ -29,7 +33,9 @@ export async function GET(request: Request) {
   const evaluated = await evaluate(records);
   const analytics = analyzeHistory(evaluated, range);
   const rows = analytics.rows;
+  const { start, end, ...paging } = paginate(rows.length, page, pageSize);
   return NextResponse.json({
+    ...paging,
     ts: Date.now(),
     empty: false,
     range: analytics.range,
@@ -44,6 +50,6 @@ export async function GET(request: Request) {
     by_side: groupBy(rows, (r) => r.sig),
     by_mode: groupBy(rows, (r) => r.mode ?? "UNKNOWN"),
     by_coin: groupBy(rows, (r) => r.coin).sort((a, b) => b.stats.total - a.stats.total),
-    rows: rows.slice(0, 120),
+    rows: rows.slice(start, end),
   });
 }

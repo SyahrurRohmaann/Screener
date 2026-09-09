@@ -13,6 +13,7 @@ import ScaleControl from "./ScaleControl";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
+import { isMarketStale } from "../lib/signalFreshness";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
@@ -32,6 +33,7 @@ const MODES = ["ALL", "TREND", "COUNTER"] as const;
 export default function Dashboard() {
   const [rows, setRows] = useState<Row[]>(demo);
   const [updated, setUpdated] = useState<Date | null>(null);
+  const [marketTs, setMarketTs] = useState<number | null>(null);
   const [side, setSide] = useState<(typeof SIDES)[number]>("ALL");
   const [mode, setMode] = useState<(typeof MODES)[number]>("ALL");
   const [minScore, setMinScore] = useState(0);
@@ -60,7 +62,10 @@ export default function Dashboard() {
       const response = await fetch("/api/market", { cache: "no-store" });
       if (!response.ok) return;
       const data = await response.json();
-      setRows(data.rows ?? demo);
+      setRows((data.rows ?? demo).map((r: Row & { mark?: number | null }) => ({
+        ...r, price: r.mark != null && Number.isFinite(r.mark) && r.mark > 0 ? r.mark : r.price,
+      })));
+      setMarketTs(typeof data.ts === "number" ? data.ts : null);
       setMarketHealth(data.diagnostics ?? null);
       setUpdated(new Date());
     } catch { /* keep the previous rows rather than blanking the screen */ }
@@ -144,11 +149,11 @@ export default function Dashboard() {
     if (mode !== "ALL" && r.mode !== mode) return false;
     if (minScore > 0 && (r.score ?? 0) < minScore) return false;
     if (hideStale) {
-      const state = liveStatus(r);
+      const state = liveStatus(r, now);
       if (state === "EXPIRED" || state === "INVALIDATED") return false;
     }
     return true;
-  }), [rows, side, mode, minScore, hideStale]);
+  }), [rows, side, mode, minScore, hideStale, now]);
 
   const setups = rows.filter((r) => r.sig).length;
   const chartRow = chartCoin ? rows.find((r) => r.coin === chartCoin) ?? null : null;
@@ -160,6 +165,7 @@ export default function Dashboard() {
         <span className={`pulse ${feed === "OFF" ? "dead" : ""}`} />
         {feed === "WS" ? "LIVE · WEBSOCKET" : feed === "POLL" ? "LIVE · POLLING 3S" : "MENGHUBUNGKAN…"}
         {tick && <em className="tick">{tick.toLocaleTimeString("id-ID")}</em>}
+        {isMarketStale(marketTs, now) && <span className="tag st-weakening" role="status">USANG · DATA SINYAL</span>}
         <ScaleControl />
         <button onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
       </div>
@@ -203,7 +209,7 @@ export default function Dashboard() {
     </nav>
 
     <section className="grid">{shown.length ? shown.map((r) => {
-      const state = liveStatus(r);
+      const state = liveStatus(r, now);
       const entry = liveEntrySnapshot(r, r.price, now);
       const dead = state === "EXPIRED" || state === "INVALIDATED";
       return <article className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}`} key={r.coin}>
@@ -220,7 +226,7 @@ export default function Dashboard() {
         <div className="tags">
           <span className={`tag st-${state.toLowerCase()}`}>{state}</span>
           {r.mode && <span className="tag">{r.mode === "TREND" ? "SEARAH TREN" : "COUNTER-TREND"}</span>}
-          <span className="tag muted">{r.sig ? age(r.age_min) : "no setup"}</span>
+          <span className="tag muted">{r.sig ? age(entry?.signal_age_min ?? r.age_min) : "no setup"}</span>
         </div>
 
         <div className="score">

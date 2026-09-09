@@ -1,0 +1,30 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+
+test("service worker displays safe payloads and focuses or opens only same-origin root", async () => {
+  const source = await readFile("public/sw.js", "utf8");
+  const handlers: Record<string, (event: any) => void> = {};
+  const notifications: any[] = [];
+  const opened: string[] = [];
+  let focused = 0;
+  let windows: any[] = [];
+  const clients = { matchAll: async () => windows, openWindow: async (url: string) => { opened.push(url); } };
+  vm.runInNewContext(source, { URL, self: { location: { origin: "https://screener.test" }, clients, addEventListener: (name: string, handler: any) => { handlers[name] = handler; }, registration: { showNotification: async (...args: any[]) => { notifications.push(args); } } } });
+  let pending!: Promise<unknown>;
+  const waitUntil = (promise: Promise<unknown>) => { pending = promise; };
+  handlers.push({ data: { json: () => ({ title: "BTC", body: "LONG", tag: "BTC-1", url: "https://evil.test" }) }, waitUntil });
+  await pending;
+  assert.equal(notifications[0][1].data.url, "/");
+  handlers.push({ data: { json: () => { throw new Error("bad JSON"); } }, waitUntil });
+  await pending;
+  assert.equal(notifications.length, 2);
+  const click = { notification: { close() {}, data: { url: "https://evil.test" } }, waitUntil };
+  windows = [{ url: "https://evil.test/", focus: async () => { assert.fail("foreign window"); } }, { url: "https://screener.test/", focus: async () => { focused++; } }];
+  handlers.notificationclick(click); await pending;
+  assert.equal(focused, 1);
+  windows = [{ url: "https://screener.test/history", focus: async () => { assert.fail("not root"); } }];
+  handlers.notificationclick(click); await pending;
+  assert.deepEqual(opened, ["/"]);
+});

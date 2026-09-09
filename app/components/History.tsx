@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { money, num } from "../lib/format";
+import { HISTORY_PAGE_SIZES, HISTORY_PAGE_SIZE_KEY, paginate } from "../lib/history-paging";
 
 type Stats = {
   total: number; resolved: number; open: number; wins: number; losses: number;
@@ -21,6 +22,7 @@ type EvalRow = {
   outcome: string; r_multiple: number | null; net_r: number | null; bars_held: number | null;
 };
 type Payload = {
+  page: number; pageSize: number; total: number; total_pages: number;
   empty: boolean; note?: string; stats: Stats | null; range: Range;
   by_score: Bucket[]; by_side: Bucket[]; by_mode: Bucket[]; by_coin: Bucket[];
   by_atr: Bucket[]; by_trend_1h: Bucket[]; equity_curve: EquityPoint[];
@@ -62,16 +64,55 @@ export default function History() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [range, setRange] = useState<Range>("30");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState(false);
+  const requestId = useRef(0);
+  const controller = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    try { setPageSize(paginate(0, 1, localStorage.getItem(HISTORY_PAGE_SIZE_KEY)).pageSize); }
+    catch { /* Storage may be unavailable. */ }
+  }, []);
+
+  function invalidate() {
+    requestId.current += 1;
+    controller.current?.abort();
+    setData(null);
+    setError(false);
     setLoading(true);
-    try {
-      const response = await fetch(`/api/history?range=${range}`, { cache: "no-store" });
-      setData(await response.json());
-    } catch { /* keep previous view */ } finally { setLoading(false); }
-  }, [range]);
+  }
 
-  useEffect(() => { if (open) load(); }, [open, load]);
+  useEffect(() => {
+    if (!open) return;
+    const id = ++requestId.current;
+    const abort = new AbortController();
+    controller.current = abort;
+    setLoading(true);
+    setError(false);
+    setData(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/history?range=${range}&page=${page}&pageSize=${pageSize}`, {
+          cache: "no-store", signal: abort.signal,
+        });
+        if (!response.ok) throw new Error("History request failed");
+        const payload: Payload = await response.json();
+        if (payload.range !== range || payload.page !== page || payload.pageSize !== pageSize ||
+            !Number.isSafeInteger(payload.total) || payload.total < 0 ||
+            payload.total_pages !== Math.ceil(payload.total / pageSize) || !Array.isArray(payload.rows)) {
+          throw new Error("Invalid history response");
+        }
+        if (id === requestId.current && !abort.signal.aborted) setData(payload);
+      } catch {
+        if (id === requestId.current && !abort.signal.aborted) setError(true);
+      } finally {
+        if (id === requestId.current && !abort.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => { abort.abort(); };
+  }, [open, range, page, pageSize, revision]);
 
   const s = data?.stats;
 
@@ -82,20 +123,40 @@ export default function History() {
         <span>Setiap sinyal direplay ke candle 30m berikutnya. Stop dianggap kena lebih dulu bila satu candle menyentuh stop dan target — hasilnya konservatif, bukan dilebihkan.</span>
       </div>
       <div className="histBtns">
-        <button onClick={() => setOpen((v) => !v)}>{open ? "▲ TUTUP" : "▼ BUKA"}</button>
-        {open && <button onClick={load}>{loading ? "MENGHITUNG…" : "↻ HITUNG ULANG"}</button>}
+        <button onClick={() => { invalidate(); setOpen((v) => !v); }}>{open ? "▲ TUTUP" : "▼ BUKA"}</button>
+        {open && <button disabled={loading} onClick={() => { invalidate(); setRevision((v) => v + 1); }}>{loading ? "MENGHITUNG…" : "↻ HITUNG ULANG"}</button>}
       </div>
     </div>
 
     {open && <>
       <div className="rangeBtns" aria-label="Rentang history">
         {(["30", "60", "90", "all"] as Range[]).map((value) =>
-          <button key={value} className={range === value ? "active" : ""} onClick={() => setRange(value)}>
+          <button key={value} className={range === value ? "active" : ""} onClick={() => {
+            if (value === range) return;
+            invalidate(); setRange(value); setPage(1);
+          }}>
             {value === "all" ? "SEMUA" : `${value} HARI`}
           </button>)}
       </div>
+      <div className="rangeBtns" role="group" aria-label="Halaman riwayat sinyal" aria-busy={loading}>
+        <label>BARIS PER HALAMAN <select value={pageSize} onChange={(event) => {
+          const size = paginate(0, 1, event.target.value).pageSize;
+          invalidate(); setPageSize(size); setPage(1);
+          try { localStorage.setItem(HISTORY_PAGE_SIZE_KEY, String(size)); }
+          catch { /* Keep the selection for this session if storage is blocked. */ }
+        }}>{HISTORY_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+        <button disabled={loading || page <= 1} onClick={() => {
+          invalidate(); setPage(Math.max(1, Math.min(page - 1, data?.total_pages || 1)));
+        }}>SEBELUMNYA</button>
+        <span aria-live="polite">HALAMAN {page}{data ? ` / ${data.total_pages} | ${data.total} SINYAL` : ""}</span>
+        <button disabled={loading || !data || page >= data.total_pages} onClick={() => {
+          invalidate(); setPage(page + 1);
+        }}>BERIKUTNYA</button>
+      </div>
+      {error && <p className="calcEmpty" role="alert">Gagal memuat riwayat. Gunakan HITUNG ULANG untuk mencoba lagi.</p>}
       {!data && loading && <p className="calcEmpty">Mengevaluasi riwayat…</p>}
       {data?.empty && <p className="calcEmpty">{data.note}</p>}
+      {data && !data.empty && !data.rows.length && <p className="calcEmpty">Tidak ada sinyal di halaman ini. Pilih SEBELUMNYA atau ubah rentang.</p>}
 
       {s && <>
         <div className="statGrid">

@@ -26,10 +26,24 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
   context, mark price freshness, history writes, and clock drift — a partial upstream
   failure is shown as DEGRADED/STALE instead of silently looking like a calm market
 - Responsive dark trading terminal UI
-- Automatic refresh every 60 seconds and manual refresh button
+- Automatic market refresh every 30 seconds and manual refresh button
 - No API key required for the public Binance endpoints
 
 > This is an information tool for manual validation, not an auto-trading system. The historical edge is thin; do not treat a signal as a guaranteed entry or use it as a leverage recommendation.
+
+## Signal Freshness Rules (2026-09-09)
+
+Preregistered Task B rules, evaluated in this order:
+
+- No selected signal means `NONE`. Selection, `MIN_SCORE`, confluence, entry/stop/targets and closed 30m + 1h inputs are unchanged.
+- `INVALIDATED` wins over every age/displacement rule: LONG mark <= stop or SHORT mark >= stop, including equality. An already invalidated status remains invalidated on the client.
+- Age is elapsed milliseconds since `signal_closed_at` divided by 60,000, clamped at zero, without rounding for classification. Age >30 minutes is `EXPIRED`.
+- Otherwise failed qualifying conditions or distance outside either entry-zone edge strictly >0.5 ATR means `WEAKENING`. Exactly 0.5 ATR does not downgrade. Missing/nonfinite/nonpositive ATR skips only displacement checking.
+- Otherwise age <=5 minutes is `NEW`, age >5 and <=15 is `VALID`, and age >15 and <=30 is `WEAKENING`.
+- Server status uses the available finite positive mark (candle close fallback); the response `price` and recorded history close remain the original candle close. Dashboard uses that mark initially, then WebSocket/polled prices, for live downgrades. Server downgrades are not upgraded locally.
+- Market re-evaluation is requested every 30 seconds without overlapping requests. The client clock ages displayed statuses every second even if requests fail. Task C also adds a configured server scheduler (below); neither guarantees upstream availability.
+- `USANG` marks market response `ts` older than strictly 300 seconds, even while live prices still arrive or failed fetches retain old rows. Missing/invalid timestamps are stale; successful receipt time and price/context updates do not reset market freshness.
+- These are display freshness rules, not a validated trading exit or chase cutoff. No historical stop-hit tracking is added.
 
 ## Run locally
 
@@ -67,6 +81,69 @@ SCREENER_EVAL_BARS=48        # 30m bars before a setup is marked TIMEOUT
 RANKING_SNAPSHOT_TOKEN=...   # optional bearer plus mandatory same-origin POST
 SCREENER_COOKIE_SECURE=1     # set ONLY once the site is served over HTTPS
 ```
+
+## Server Web Push
+
+Web Push is opt-in per browser using **AKTIFKAN PUSH SERVER**. HTTPS is required
+(localhost is allowed for development). iOS/iPadOS requires a supported OS and an
+installed Home Screen web app. The existing NOTIF control still governs page-local
+status notifications; inbox, toasts and optional audio remain unchanged. A browser
+with a PushManager subscription suppresses page-local new-signal OS notifications
+to avoid doubling the server push. Disable server push separately on each device.
+
+Operator setup, not performed by this implementation:
+
+1. Run `npx web-push generate-vapid-keys` once on a trusted host. Keep the private key secret; never commit either configuration or generated output.
+2. Supply `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and preferably `VAPID_SUBJECT=mailto:operator@example.com` (a real contact or HTTPS URL) to the serving Node process through the existing operator-managed environment/Compose configuration. Do not rotate keys casually: existing subscriptions need to be disabled and re-enabled after rotation.
+3. Persist `SCREENER_DATA_DIR`. It holds `push-subscriptions.json` and `push-sent.json` alongside signal history; subscription endpoints are sensitive capability URLs. Files are atomically replaced with mode 600. Back up and restrict access to this directory.
+4. Restart the serving process, log in over HTTPS, and opt in on each browser. Missing VAPID keys return HTTP 503 `push_not_configured`, displayed as "Notifikasi server belum dikonfigurasi." No keys are generated automatically.
+
+Next.js 14 instrumentation starts an immediate scan and a 30-second timer only in
+a configured Node serving runtime. `next build`, Node tests, Edge runtime, and
+`SCREENER_DISABLE_WORKER=1` never start it. Without VAPID, market scans remain
+request-driven. The route and timer use the same process-global single-flight
+service, with the original coin selection, candle intervals, score and entry logic.
+Slow scans skip overlapping ticks; this is a cadence, not a 30-second SLA.
+
+The first process scan is a silent baseline, including on restart. Only keys
+actually newly appended by `recordSignals` become eligible thereafter. Push
+attempt keys are held in memory and persisted before sending (last 4,000 keys;
+the append-only signal ledger is the primary long-term dedupe). This is
+**at-most-once attempted delivery**, not exactly-once delivery: failures, crashes
+after claiming, or no subscribers can lose alerts, and there is no retry backlog.
+Each send has a 5-second deadline and a 5-minute TTL; individual failures are
+isolated and 404/410 subscriptions are removed. Corrupt/unwritable push storage
+fails closed without breaking market responses. Files and scan locks assume
+**one long-lived Node process**, not multiple replicas, serverless or an Edge host.
+Push jobs serialize separately from scans; a large subscriber fleet requires a
+dedicated bounded worker/queue rather than this small single-instance scheduler.
+
+Subscription mutations require the existing live session guard plus an explicit
+same-origin Origin; forwarded headers are not trusted. The proxy must preserve
+the public request origin. Endpoints allow only HTTPS standard-port FCM, Mozilla,
+Apple and Windows browser-push hosts (no arbitrary URLs, IPs, credentials or
+redirect targets); unsupported providers need an explicit allowlist review.
+Requests are streamed with a 4,096-byte limit; keys require canonical base64url
+with 65-byte uncompressed public-key and 16-byte auth-secret shapes. Duplicate
+endpoints update one record, with a 1,000-subscription cap. Browser endpoints
+remain active after the login session expires or logout: log in to opt out, or
+revoke notification permission in browser settings. Notifications expose the
+coin, direction and score on the lock screen. They contain no private account data.
+
+Manual operator checks (not automated browser E2E):
+
+- Missing VAPID: opt-in shows the configuration message without breaking inbox/toasts.
+- On each target browser/installed PWA: grant permission, confirm subscribe success, reload and confirm active state. Denied/unsupported states should be clear.
+- Close every tab, wait for a genuinely new recorded signal after the baseline, and confirm one OS alert. Repeat with a tab open: inbox/toast should remain, without a second page-generated new-signal OS alert.
+- Click the notification: focus an existing root tab or open `/`, never a payload-provided URL; expired sessions should land at login.
+- Disable push, reload, and confirm no further server alerts for that browser. Re-enable, test a server restart, and confirm old history is not replayed.
+- Check persistence permissions, upstream connectivity, background scan warnings, and OS notification/battery settings. Test revoked subscriptions and VAPID rotation on staging only.
+
+24/7 describes server-side scanning while the process and upstream are healthy,
+**not guaranteed 24-hour OS delivery**. Force-quitting the browser/PWA, OS power
+restrictions, offline devices, push-provider outages and permission revocation can
+delay or prevent notifications. Status/entry/TP updates remain tab-local; only new
+recorded signals use server push. No real pushes were sent during automated tests.
 
 ## Login and sessions
 
@@ -156,7 +233,7 @@ app/lib/ranking*.ts, portfolio.ts, forward-stats.ts
   -> fixed-universe experiment and immutable weekly observations
 
 app/page.tsx
-  -> polls /api/market every 60 seconds; mark price uses Binance WebSocket
+  -> polls /api/market every 30 seconds; mark price uses Binance WebSocket
   -> renders the dashboard
 ```
 

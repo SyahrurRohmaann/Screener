@@ -1,3 +1,5 @@
+import { signalStatus } from "./signalFreshness";
+
 export type Plan = {
   entry_low: number; entry_high: number; invalidation: number;
   risk_pct: number; tp1: number; tp2: number; rr1: number; rr2: number;
@@ -6,7 +8,7 @@ export type Plan = {
 export type Row = {
   coin: string; price: number; sig?: "LONG" | "SHORT" | null; score: number; rsi: number;
   trend_1h: string; timeframe?: string; mode?: "TREND" | "COUNTER" | null; status?: string;
-  age_min?: number; atr_pct?: number | null; plan?: Plan | null; reasons?: string[];
+  age_min?: number; atr?: number | null; atr_pct?: number | null; plan?: Plan | null; reasons?: string[];
   funding?: number; oi_chg?: number; ls_ratio?: number; taker?: number;
   // Closed candle the signal was born on; the stable half of a signal's identity.
   signal_closed_at?: number;
@@ -108,7 +110,12 @@ export function liveEntrySnapshot(r: Row, mark = r.price, now?: number): LiveEnt
 }
 
 /** Realtime mark price can kill a plan before the next 30s indicator refresh. */
-export function liveStatus(r: Row) {
-  if (!r.sig || !r.plan) return r.status ?? "NONE";
-  return entryStatus(r) === "INVALID" ? "INVALIDATED" : r.status ?? "NONE";
+export function liveStatus(r: Row, now?: number) {
+  if (!r.sig) return r.status ?? "NONE";
+  const ageMin = now != null && r.signal_closed_at != null
+    ? Math.max(0, (now - r.signal_closed_at) / 60_000) : r.age_min ?? 0;
+  const displaced = !!r.plan && r.atr != null && Number.isFinite(r.atr) && r.atr > 0
+    && Math.max(r.plan.entry_low - r.price, r.price - r.plan.entry_high) > 0.5 * r.atr;
+  return signalStatus(r.status === "EXPIRED" ? Infinity : ageMin,
+    r.status !== "WEAKENING", r.status === "INVALIDATED" || entryStatus(r) === "INVALID", displaced);
 }
