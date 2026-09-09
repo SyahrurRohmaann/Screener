@@ -173,7 +173,7 @@ export default function Dashboard() {
       <div>
         <p className="eyebrow">SINYAL TEKNIKAL / 30M + 1H</p>
         <h1>Informasi teknikal.<br /><em>Bukan edge tervalidasi.</em></h1>
-        <p className="sub">Kartu confluence berdiri sendiri dan tidak memfilter eksperimen ranking. <Link href="/ranking">Lihat eksperimen ranking terpisah →</Link></p>
+        <p className="sub">Kartu confluence berdiri sendiri dan tidak memfilter eksperimen ranking. <Link href="/ranking">Lihat eksperimen ranking terpisah →</Link> · <Link href="/reverse">Reverse replay (paper only) →</Link></p>
       </div>
       <div className="heroStats">
         <div><strong>{setups.toString().padStart(2, "0")}</strong><span>ACTIVE SETUPS</span></div>

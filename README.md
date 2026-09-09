@@ -6,6 +6,7 @@ Realtime Binance USDT-M Futures screener built with Next.js, React, and TypeScri
 
 ## Features
 
+- Separate authenticated `/reverse` paper-only replay with original-versus-reverse statistics; no orders or history writes
 - Separate `/ranking` preregistered forward experiment over a fixed 16-asset universe
 - Immutable weekly JSONL observations with a strict 16/16 completeness gate
 - Paper top-4 versus equal-weight-16 benchmark; breadth is context only
@@ -160,3 +161,24 @@ app/page.tsx
 ```
 
 The dashboard intentionally does not place trades.
+
+## Reverse Paper Replay
+
+`/reverse` and `GET /api/reverse?range=30` require an active session. Ranges are
+`30`, `60`, `90`, and `all`. LONG/SHORT are swapped; WAIT remains WAIT (the
+signal log contains only active signals). Entry and signal conditions stay the
+same; each stop/target is reflected as `2 * entry - original_level`, preserving
+its percentage distance. Trend-relative mode is inverted, not the original evidence.
+
+Both sides use the same logged records and fetched closed 30m candles. This is
+retrospective hypothetical replay, not preregistered forward evidence or proof of
+fills. The recorded entry is assumed filled; stop wins both-touch ambiguity;
+TP2 is checked before TP1, and either target exits fully. Fees use
+`SCREENER_FEE_PCT`; timeout uses `SCREENER_EVAL_BARS`. Funding and slippage are
+not modeled. Drawdown is signal-order cumulative net R, not account equity.
+
+Only the latest 500 candles per coin are fetched. Missing signal coverage or
+gaps needed by either replay mark both sides UNKNOWN and exclude them from
+resolved statistics. History is subject to `SCREENER_HISTORY_MAX`; choosing
+90 days does not guarantee 90 days of evidence. No reverse results are persisted,
+and the original screener and `/api/history` behavior are unchanged.

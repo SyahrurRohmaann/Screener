@@ -1,0 +1,52 @@
+.reversePage { max-width: 1400px; padding-bottom: 48px; }
+.reversePage a { color: var(--green); text-underline-offset: 4px; }
+.reversePage .reverseNav { min-height: 76px; display: flex; justify-content: space-between; align-items: center; gap: 24px; border-bottom: 1px solid var(--line); }
+.reversePage .reverseNav a { font-size: .75rem; }
+.reversePage .reverseNav .brand { color: var(--text); text-decoration: none; }
+.reversePage .reverseHero { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: end; gap: 40px; padding: 56px 0 32px; }
+.reversePage .reverseEyebrow { color: var(--gold); font: .6875rem/1.7 'DM Mono', monospace; letter-spacing: 1.4px; overflow-wrap: anywhere; }
+.reversePage h1 { font-size: clamp(2.5rem, 5.5vw, 4.75rem); line-height: 1.05; letter-spacing: -2px; margin: 16px 0; }
+.reversePage h1 em { color: var(--gold); font-style: normal; }
+.reversePage .reverseHero p:not(.reverseEyebrow) { color: var(--muted); line-height: 1.7; max-width: 620px; }
+.reversePage .reverseWarning { display: grid; gap: 12px; padding: 24px; border: 1px solid #6b5730; background: linear-gradient(135deg, #211c10, #11151d); }
+.reversePage .reverseWarning b { color: var(--gold); font: .75rem 'DM Mono', monospace; letter-spacing: 1px; }
+.reversePage .reverseWarning strong { font-size: 1.4rem; }
+.reversePage .reverseWarning span { color: #bbc1c9; font-size: .875rem; line-height: 1.7; }
+.reversePage .reversePanel { min-width: 0; border: 1px solid var(--line); background: linear-gradient(145deg, #11151d, #0d1016); padding: 24px; margin-bottom: 16px; }
+.reversePage h2 { font-size: 1.125rem; margin: 0; }
+.reversePage h3 { font: .75rem/1.6 'DM Mono', monospace; letter-spacing: 1px; margin: 0 0 16px; }
+.reversePage .reverseRules ul { padding-left: 20px; margin: 16px 0 0; color: #aeb6c1; font-size: .8125rem; line-height: 1.8; }
+.reversePage .reverseRules li + li { margin-top: 6px; }
+.reversePage .reverseToolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 32px 0 20px; }
+.reversePage .reverseControls { display: flex; flex-wrap: wrap; gap: 8px; }
+.reversePage .reverseControls button { min-height: 44px; font-size: .6875rem; }
+.reversePage button[aria-pressed="true"] { background: #211c10; border-color: var(--gold); color: var(--gold); }
+.reversePage button:disabled { opacity: .5; cursor: not-allowed; }
+.reversePage :focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+.reversePage .reverseMeta, .reversePage .reverseState { font: .75rem/1.8 'DM Mono', monospace; color: #aeb6c1; overflow-wrap: anywhere; }
+.reversePage .reverseError { border-color: var(--red); color: var(--red); }
+.reversePage .reverseCaution { color: var(--gold); font-size: .8125rem; line-height: 1.7; }
+.reversePage .reverseScroll { max-width: 100%; overflow-x: auto; }
+.reversePage table { width: 100%; border-collapse: collapse; font: .75rem/1.6 'DM Mono', monospace; font-variant-numeric: tabular-nums; }
+.reversePage caption { text-align: left; color: #aeb6c1; font-size: .75rem; padding-bottom: 16px; }
+.reversePage th, .reversePage td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.reversePage thead th { color: var(--muted); font-weight: 400; font-size: .6875rem; }
+.reversePage .reverseComparison { min-width: 440px; }
+.reversePage .reverseComparison tbody th { font-weight: 400; color: #bbc1c9; }
+.reversePage .reverseComparison td { text-align: right; }
+.reversePage .reverseComparison thead th:not(:first-child) { text-align: right; }
+.reversePage .reverseComparison td:last-child, .reversePage .reverseComparison thead th:last-child { color: var(--gold); background: #e9bd7006; }
+.reversePage .reverseOutcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.reversePage dl { margin: 0; font: .75rem 'DM Mono', monospace; }
+.reversePage dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.reversePage dt { color: #bbc1c9; }
+.reversePage dd { margin: 0; }
+.reversePage .reverseRecords { white-space: nowrap; }
+.reversePage .reverseRecords tbody + tbody { border-top: 2px solid #39424f; }
+.reversePage .reverseRecords tbody tr:nth-child(2) { background: #e9bd7006; }
+@media (max-width: 760px) {
+  .reversePage .reverseHero { grid-template-columns: 1fr; gap: 20px; padding-top: 36px; }
+  .reversePage .reverseOutcomes { grid-template-columns: 1fr; gap: 0; }
+  .reversePage .reversePanel { padding: 16px; }
+  .reversePage .reverseNav { flex-wrap: wrap; padding: 18px 0; gap: 16px; }
+}
