@@ -1,9 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import "./account.css";
 
-export default function AccountPanel() {
+export default function AccountPanel({ scaleControl }: { scaleControl?: ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
@@ -41,6 +41,7 @@ export default function AccountPanel() {
       {open ? "TUTUP AKUN" : "AKUN"}
     </button>
     <button type="button" className="accountToggle" onClick={signOut}>KELUAR</button>
+    {scaleControl && <div className="accountScale">{scaleControl}</div>}
     {open && <form className="accountForm" onSubmit={submit}>
       <label htmlFor="current">Password sekarang</label>
       <input id="current" type="password" autoComplete="current-password" value={current}

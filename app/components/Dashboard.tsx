@@ -166,12 +166,11 @@ export default function Dashboard() {
         {feed === "WS" ? "LIVE · WEBSOCKET" : feed === "POLL" ? "LIVE · POLLING 3S" : "MENGHUBUNGKAN…"}
         {tick && <em className="tick">{tick.toLocaleTimeString("id-ID")}</em>}
         {isMarketStale(marketTs, now) && <span className="tag st-weakening" role="status">USANG · DATA SINYAL</span>}
-        <ScaleControl />
         <button className="refreshBtn" onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
       </div>
     </header>
 
-    <AccountPanel />
+    <AccountPanel scaleControl={<ScaleControl />} />
     <DataHealth market={marketHealth} context={contextHealth} price={priceHealth} />
     <SignalAlerts rows={rows} onOpenSignal={setChartCoin} />
 
