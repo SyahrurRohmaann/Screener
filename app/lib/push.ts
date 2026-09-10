@@ -46,8 +46,14 @@ export async function readPushBody(request: Request): Promise<unknown> {
 }
 
 export function sameOriginMutation(request: Request) {
-  return request.headers.get("origin") === new URL(request.url).origin &&
-    !["cross-site", "same-site"].includes(request.headers.get("sec-fetch-site") ?? "");
+  const origin = request.headers.get("origin");
+  if (!origin || origin === "null" || ["cross-site", "same-site"].includes(request.headers.get("sec-fetch-site") ?? "")) return false;
+  // Standalone request URLs use the container hostname, not the public proxy host.
+  const host = (request.headers.get("x-forwarded-host")?.split(",")[0] ?? request.headers.get("host"))?.trim();
+  if (!host) return false;
+  const protocol = request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ??
+    (/^localhost(?::\d+)?$/i.test(host) ? "http" : "https");
+  return ["http", "https"].includes(protocol) && origin === `${protocol}://${host}`;
 }
 
 export function pushPayload(signal: PushSignal) {

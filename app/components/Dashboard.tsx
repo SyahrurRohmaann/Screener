@@ -167,7 +167,7 @@ export default function Dashboard() {
         {tick && <em className="tick">{tick.toLocaleTimeString("id-ID")}</em>}
         {isMarketStale(marketTs, now) && <span className="tag st-weakening" role="status">USANG · DATA SINYAL</span>}
         <ScaleControl />
-        <button onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
+        <button className="refreshBtn" onClick={load}>{loading ? "SYNCING…" : "↻ REFRESH"}</button>
       </div>
     </header>
 

@@ -35,10 +35,24 @@ test("bounded streaming JSON rejects oversized bodies without trusting content-l
 });
 
 test("mutations require explicit matching Origin and reject cross-site fetches", () => {
-  const req = (headers: Record<string, string>) => new Request("https://screener.test/api/push/subscribe", { method: "POST", headers });
+  const req = (headers: Record<string, string>) => new Request("https://screener.test/api/push/subscribe", { method: "POST", headers: { host: "screener.test", ...headers } });
   assert.equal(sameOriginMutation(req({ origin: "https://screener.test" })), true);
-  const invalid: Record<string, string>[] = [{}, { origin: "null" }, { origin: "https://evil.test" }, { origin: "https://screener.test", "sec-fetch-site": "cross-site" }];
+  const invalid: Record<string, string>[] = [{}, { origin: "null" }, { origin: "https://evil.test" }, { origin: "https://screener.test", "sec-fetch-site": "cross-site" }, { origin: "https://screener.test", "sec-fetch-site": "same-site" }];
   for (const headers of invalid) assert.equal(sameOriginMutation(req(headers)), false);
+});
+
+test("mutations compare the public proxy headers rather than the standalone URL", () => {
+  const req = (headers: Record<string, string>) => new Request("https://container:3000/api/push/subscribe", { method: "POST", headers });
+  assert.equal(sameOriginMutation(req({ origin: "https://scansignal.my.id", host: "scansignal.my.id", "x-forwarded-proto": "https" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "https://scansignal.my.id:8443", host: "container:3000", "x-forwarded-host": " scansignal.my.id:8443, internal.test", "x-forwarded-proto": " https, http" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "https://container:3000", host: "container:3000", "x-forwarded-host": "scansignal.my.id", "x-forwarded-proto": "https" })), false);
+  assert.equal(sameOriginMutation(req({ origin: "https://scansignal.my.id", host: "scansignal.my.id" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "http://localhost:3000", host: "localhost:3000" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "http://localhost", host: "localhost" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "https://localhost:3000", host: "localhost:3000", "x-forwarded-proto": "https" })), true);
+  assert.equal(sameOriginMutation(req({ origin: "https://container:3000" })), false);
+  assert.equal(sameOriginMutation(req({ origin: "http://scansignal.my.id", host: "scansignal.my.id" })), false);
+  assert.equal(sameOriginMutation(req({ origin: "https://scansignal.my.id/", host: "scansignal.my.id" })), false);
 });
 
 test("push payload contains only a bounded signal summary and a fixed safe destination", () => {
