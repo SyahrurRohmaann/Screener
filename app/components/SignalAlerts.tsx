@@ -38,7 +38,8 @@ export default function SignalAlerts({
   const [enabled, setEnabled] = useState(false);
   const [pushActive, setPushActive] = useState<boolean | null>(null);
   const [alertPrefs, setAlertPrefs] = useState<AlertPrefs>(defaultAlertPrefs);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gateEnabled, setGateEnabled] = useState<boolean | null>(null);
+  const [gateBusy, setGateBusy] = useState(false);
   const [sound, setSound] = useState(false);
   const [volume, setVolume] = useState(0.7);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
@@ -47,6 +48,17 @@ export default function SignalAlerts({
   const primed = useRef(false);
   const hydrated = useRef(false);
   const statusStates = useRef<Map<string, AlertState>>(new Map());
+
+  useEffect(() => {
+    let disposed = false;
+    void fetch("/api/push/settings", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error("settings_unavailable");
+      const settings = await response.json();
+      if (typeof settings.gateEnabled !== "boolean") throw new Error("invalid_settings");
+      if (!disposed) setGateEnabled(settings.gateEnabled);
+    }).catch(() => { if (!disposed) setGateEnabled(null); });
+    return () => { disposed = true; };
+  }, []);
 
   useEffect(() => {
     try {
@@ -195,17 +207,25 @@ export default function SignalAlerts({
     playChime("NEW_LONG", volume);
   };
 
-  const changeVolume = (next: number) => {
-    const safe = clampVolume(next);
-    setVolume(safe);
-    try { localStorage.setItem(VOLUME_PREF, String(safe)); } catch {}
-    if (sound) playChime("STATUS", safe);
+  const toggleGate = async () => {
+    if (gateEnabled === null || gateBusy) return;
+    const previous = gateEnabled;
+    setGateEnabled(!previous);
+    setGateBusy(true);
+    try {
+      const response = await fetch("/api/push/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gateEnabled: !previous }),
+      });
+      if (!response.ok) throw new Error("settings_unavailable");
+      const settings = await response.json();
+      if (typeof settings.gateEnabled !== "boolean") throw new Error("invalid_settings");
+      setGateEnabled(settings.gateEnabled);
+    } catch { setGateEnabled(previous); }
+    finally { setGateBusy(false); }
   };
 
-  const label =
-    permission === "unsupported" ? "NOTIF TIDAK DIDUKUNG"
-    : permission === "denied" ? "NOTIF DIBLOKIR BROWSER"
-    : enabled ? "🔔 NOTIF AKTIF" : "🔕 NOTIF MATI";
+  const statusEnabled = alertPrefs.entry || alertPrefs.invalidated || alertPrefs.tp1 || alertPrefs.tp2;
   const unread = inboxUnread(inbox);
 
   return <>
@@ -215,37 +235,23 @@ export default function SignalAlerts({
         className={enabled ? "notifOn" : ""}
         onClick={toggle}
         disabled={permission === "unsupported" || permission === "denied"}
-      >{label}</button>
+      >{enabled ? "NOTIF AKTIF" : "NOTIF MATI"}</button>
+      <button className={gateEnabled ? "notifOn" : ""} onClick={toggleGate}
+        disabled={gateEnabled === null || gateBusy} aria-pressed={gateEnabled ?? false}>
+        {gateEnabled === null ? "SELEKTIF?" : gateEnabled ? "SELEKTIF AKTIF" : "SELEKTIF MATI"}
+      </button>
       <button className={`inboxToggle ${inboxOpen ? "notifOn" : ""}`} onClick={() => setInboxOpen((v) => !v)}>
         ☰ INBOX {unread > 0 && <i>{unread > 99 ? "99+" : unread}</i>}
       </button>
-      <button className={settingsOpen ? "notifOn" : ""} onClick={() => setSettingsOpen((v) => !v)}>⚙ ALERT STATUS</button>
-      <button className={sound ? "notifOn" : ""} onClick={toggleSound} disabled={!audioSupported()}>
-        {!audioSupported() ? "SUARA TIDAK DIDUKUNG" : sound ? "🔊 SUARA AKTIF" : "🔈 SUARA MATI"}
+      <button className={statusEnabled ? "notifOn" : ""} aria-pressed={statusEnabled}
+        onClick={() => setAlertPrefs({ entry: !statusEnabled, invalidated: !statusEnabled, tp1: !statusEnabled, tp2: !statusEnabled })}>
+        {statusEnabled ? "STATUS AKTIF" : "STATUS MATI"}
       </button>
-      {sound && <label className="volCtl">KERAS
-        <input type="range" min={0.2} max={1} step={0.1} value={volume}
-          onChange={(e) => changeVolume(Number(e.target.value))} />
-        <b>{Math.round(volume * 100)}%</b>
-      </label>}
-      <small>
-        {permission === "denied"
-          ? "Notifikasi browser diblokir. Inbox sinyal dan kartu peringatan tetap bekerja."
-          : "Inbox menyimpan 100 sinyal terbaru di browser ini. Sinyal baru ditandai belum dibaca."}
-      </small>
+      <button className={sound ? "notifOn" : ""} onClick={toggleSound} disabled={!audioSupported()}>
+        {sound ? "SUARA AKTIF" : "SUARA MATI"}
+      </button>
+      <small>Inbox lokal di browser ini · push mengikuti tombol PUSH.</small>
     </div>
-
-    {settingsOpen && <div className="alertSettings">
-      <b>UPDATE STATUS YANG DINOTIFIKASIKAN</b>
-      {([
-        ["entry", "MASUK ZONA ENTRY"], ["invalidated", "INVALID / STOP"],
-        ["tp1", "TP1 TERSENTUH"], ["tp2", "TP2 TERSENTUH"],
-      ] as [keyof AlertPrefs, string][]).map(([key, text]) => (
-        <label key={key}><input type="checkbox" checked={alertPrefs[key]}
-          onChange={(e) => setAlertPrefs((cur) => ({ ...cur, [key]: e.target.checked }))} /> {text}</label>
-      ))}
-      <small>Toast tampil selama halaman aktif. Notifikasi OS mengikuti tombol NOTIF AKTIF. Event yang sama tidak diulang.</small>
-    </div>}
 
     {inboxOpen && <aside className="signalInbox" aria-label="Inbox sinyal">
       <div className="inboxHead">

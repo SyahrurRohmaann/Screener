@@ -3,7 +3,7 @@ import { recordSignals, type SignalRecord } from "./store";
 import { createApiCounter, type ApiCounter } from "./api-counter";
 import { buildMarketDiagnostics } from "./diagnostics";
 import { liveStatus } from "./format";
-import { pushService } from "./push";
+import { getPushSettings, pushService } from "./push";
 import { singleFlight } from "./scanWorker";
 import { mirrorPlan, reverseSide } from "./reverse";
 
@@ -198,7 +198,8 @@ async function runScan() {
     serverTimeMs,
   });
   // Delivery failures must not turn a successful market scan into an API error.
-  void pushService().publish(candidates, historyWrite.addedKeys ?? [], { diagnostics }).catch(() => {
+  const { gateEnabled } = await getPushSettings();
+  void pushService().publish(candidates, historyWrite.addedKeys ?? [], { diagnostics, gateEnabled }).catch(() => {
     console.warn("Signal push persistence failed");
   });
 

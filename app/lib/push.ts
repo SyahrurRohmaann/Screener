@@ -5,6 +5,7 @@ import { signalHref } from "./deep-link";
 import { gatePushSignals, toGateDiagnostics, type GateResult } from "./push-gate";
 
 export type Subscription = { endpoint: string; keys: { p256dh: string; auth: string } };
+export type PushSettings = { gateEnabled: boolean };
 type PushSignal = { key: string; coin: string; sig: "LONG" | "SHORT"; score: number; atr_pct?: number | null };
 
 export function validPushEndpoint(value: unknown): value is string {
@@ -90,6 +91,19 @@ export function createPushService(options: {
   };
   const subscriptions = async () => (await load<Subscription[]>("push-subscriptions.json", [])).map(parseSubscription);
   return {
+    getPushSettings: async (): Promise<PushSettings> => {
+      try {
+        const settings = await load<PushSettings | null>("push-settings.json", null);
+        return { gateEnabled: typeof settings?.gateEnabled === "boolean" ? settings.gateEnabled : true };
+      } catch { return { gateEnabled: true }; }
+    },
+    setPushSettings: (next: unknown): Promise<PushSettings> => exclusive(async () => {
+      const value = next as PushSettings | null;
+      if (typeof value?.gateEnabled !== "boolean") throw new Error("invalid_settings");
+      const settings = { gateEnabled: value.gateEnabled };
+      await save("push-settings.json", settings);
+      return settings;
+    }),
     subscribe: (value: unknown) => exclusive(async () => {
       if (!options.configured()) throw new Error("push_not_configured");
       const sub = parseSubscription(value);
@@ -102,7 +116,7 @@ export function createPushService(options: {
       if (!validPushEndpoint(endpoint)) throw new Error("invalid_subscription");
       await save("push-subscriptions.json", (await subscriptions()).filter((sub) => sub.endpoint !== endpoint));
     }),
-    publish: (candidates: PushSignal[], addedKeys: string[], opts?: { diagnostics?: unknown }) => exclusive(async () => {
+    publish: (candidates: PushSignal[], addedKeys: string[], opts?: { diagnostics?: unknown; gateEnabled?: boolean }) => exclusive(async () => {
       const result = { sent: 0, suppressed: 0 };
       if (!options.configured()) return result;
       if (!sent) sent = new Set(await load<string[]>("push-sent.json", []));
@@ -126,7 +140,8 @@ export function createPushService(options: {
         // Evaluate sequentially so a successful send also cools down this batch.
         if (opts?.diagnostics !== undefined) {
           const gate = gatePushSignals({ signals: [{ ...signal, atr_pct: signal.atr_pct }], diagnostics, now, lastSentAt });
-          if (gate.suppressed.length) {
+          // Disabling selection bypasses score/cooldown, never the data-health halt.
+          if (gate.suppressed.length && (opts.gateEnabled !== false || gate.suppressed[0].reason === "DATA_UNHEALTHY")) {
             suppressed.push({ key: signal.key, coin: signal.coin, ts: now, reason: gate.suppressed[0].reason });
             continue;
           }
@@ -173,3 +188,6 @@ export function pushService() {
     }),
   });
 }
+
+export const getPushSettings = () => pushService().getPushSettings();
+export const setPushSettings = (next: unknown) => pushService().setPushSettings(next);

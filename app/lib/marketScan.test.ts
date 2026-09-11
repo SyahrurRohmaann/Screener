@@ -2,10 +2,73 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { SignalRecord } from "./store";
 import { resetHistoryCache } from "./store";
-import { pushService } from "./push";
+import { createPushService, pushService } from "./push";
 import { scanMarket } from "./marketScan";
 import { mirrorPlan, reverseRecord } from "./reverse";
 import { liveStatus } from "./format";
+
+test("scan loads selection once, publishes low scores only when off and retains unhealthy halt", async (t) => {
+  const fs = require("node:fs/promises") as typeof import("node:fs/promises");
+  let now = Date.now();
+  let healthy = true;
+  t.mock.method(Date, "now", () => now);
+  const files = new Map<string, string>();
+  t.mock.method(fs, "readFile", async (path: string) => {
+    if (!files.has(path)) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    return files.get(path)!;
+  });
+  t.mock.method(fs, "mkdir", async () => undefined);
+  t.mock.method(fs, "appendFile", async () => undefined);
+  t.mock.method(fs, "writeFile", async (path: string, data: string) => { files.set(path, data); });
+  t.mock.method(fs, "rename", async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); });
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input);
+    let body: unknown = [];
+    if (url.pathname.endsWith("/time")) body = { serverTime: now + (healthy ? 0 : 600_000) };
+    if (url.pathname.endsWith("/premiumIndex")) body = { lastFundingRate: "0", markPrice: "200" };
+    if (url.pathname.endsWith("/klines")) body = Array.from({ length: 100 }, (_, i) => {
+      const close = 100 + i;
+      return [now - (100 - i) * 1_800_000, close - 0.1, close + 0.2, close - 0.3,
+        close, i > 94 ? 10 : 1, now - (99 - i) * 1_800_000];
+    });
+    return new Response(JSON.stringify(body));
+  });
+  const delivered: string[] = [];
+  const service = createPushService({ dir: process.cwd(), configured: () => true,
+    send: async (_sub, payload) => { delivered.push(JSON.parse(payload).tag); } });
+  let gateEnabled = true;
+  const settings = t.mock.method(pushService(), "getPushSettings", async () => ({ gateEnabled }));
+  let pending = Promise.resolve({ sent: 0, suppressed: 0 });
+  t.mock.method(pushService(), "publish", (...args: Parameters<typeof service.publish>) => {
+    pending = service.publish(...args); return pending;
+  });
+  resetHistoryCache();
+  try {
+    await service.subscribe({ endpoint: "https://fcm.googleapis.com/scan-test", keys: {
+      p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"),
+      auth: Buffer.alloc(16, 2).toString("base64url"),
+    } });
+    await service.publish([], []);
+    const selected = await scanMarket();
+    const count = selected.rows.filter(row => "sig" in row && row.sig).length;
+    assert.ok(count > 0);
+    assert.equal(selected.diagnostics.overall, "OK");
+    assert.ok(selected.rows.every(row => !("sig" in row) || !row.sig || row.score < 6));
+    assert.deepEqual(await pending, { sent: 0, suppressed: count });
+    const audit = files.get(`${process.cwd()}/push-suppressed.json`);
+    gateEnabled = false;
+    now += 1_800_000;
+    await scanMarket();
+    assert.deepEqual(await pending, { sent: count, suppressed: 0 });
+    assert.equal(files.get(`${process.cwd()}/push-suppressed.json`), audit);
+    healthy = false;
+    now += 1_800_000;
+    await scanMarket();
+    assert.deepEqual(await pending, { sent: 0, suppressed: count });
+    assert.equal(delivered.length, count);
+    assert.equal(settings.mock.callCount(), 3);
+  } finally { resetHistoryCache(); }
+});
 
 test("scan flips analyzed rows and downstream candidates only for SCREENER_REVERSE=1", async (t) => {
   const previous = process.env.SCREENER_REVERSE;

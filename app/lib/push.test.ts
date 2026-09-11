@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import Module from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPushService, parseSubscription, readPushBody, sameOriginMutation, pushPayload } from "./push";
@@ -10,6 +11,101 @@ const subscription = (id = "one") => ({
   keys: { p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"), auth: Buffer.alloc(16, 2).toString("base64url") },
 });
 const signal = (key: string) => ({ key, coin: "BTC", sig: "LONG" as const, score: 4 });
+
+test("push settings default safely, persist booleans and reject invalid writes", async () => {
+  const dir = await mkdtemp(join(process.cwd(), ".push-settings-test-"));
+  const options = { dir, configured: () => false, send: async () => assert.fail("send forbidden") };
+  try {
+    const service = createPushService(options);
+    assert.deepEqual(await service.getPushSettings(), { gateEnabled: true });
+    for (const raw of ["{", "null", "{}", '{"gateEnabled":"false"}', '{"gateEnabled":0}']) {
+      await writeFile(join(dir, "push-settings.json"), raw);
+      assert.deepEqual(await service.getPushSettings(), { gateEnabled: true });
+    }
+    assert.deepEqual(await service.setPushSettings({ gateEnabled: false }), { gateEnabled: false });
+    assert.deepEqual(await createPushService(options).getPushSettings(), { gateEnabled: false });
+    for (const invalid of [null, undefined, {}, false, { gateEnabled: "false" }, { gateEnabled: 0 }]) {
+      await assert.rejects(service.setPushSettings(invalid), /invalid_settings/);
+      assert.deepEqual(await service.getPushSettings(), { gateEnabled: false });
+    }
+    assert.deepEqual(await service.setPushSettings({ gateEnabled: true }), { gateEnabled: true });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("push settings routes guard sessions, validate mutations and disable caching", async () => {
+  const loader = Module as typeof Module & { _load: (id: string, parent: NodeModule | undefined, isMain: boolean) => unknown };
+  const filename = require.resolve("../api/push/settings/route");
+  const cached = require.cache[filename];
+  const originalLoad = loader._load;
+  let authenticated = false;
+  let settings = { gateEnabled: true };
+  let reads = 0;
+  let writes = 0;
+  delete require.cache[filename];
+  loader._load = function (id, parent, isMain) {
+    if (parent?.filename === filename && id === "../../../lib/session") return {
+      guard: async () => authenticated ? null : Response.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+    if (parent?.filename === filename && id === "../../../lib/push") return {
+      readPushBody, sameOriginMutation,
+      getPushSettings: async () => { reads++; return settings; },
+      setPushSettings: async (next: typeof settings) => {
+        if (typeof next?.gateEnabled !== "boolean") throw new Error("invalid_settings");
+        writes++; settings = next; return settings;
+      },
+    };
+    return originalLoad.call(this, id, parent, isMain);
+  };
+  try {
+    const { GET, POST } = require(filename);
+    const request = (body: string, origin = "https://screener.test") => new Request("https://screener.test/api/push/settings", {
+      method: "POST", headers: { host: "screener.test", origin }, body,
+    });
+    for (const response of [await GET(), await POST(request('{"gateEnabled":false}'))]) {
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+    }
+    assert.equal(reads + writes, 0);
+    authenticated = true;
+    assert.deepEqual(await (await GET()).json(), { gateEnabled: true });
+    const response = await POST(request('{"gateEnabled":false}'));
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.deepEqual(await response.json(), { gateEnabled: false });
+    assert.deepEqual(await (await GET()).json(), { gateEnabled: false });
+    for (const [body, status] of [["{}", 400], ["{", 400], ['{"gateEnabled":"false"}', 400], ["x".repeat(4097), 413]] as const) {
+      const rejected = await POST(request(body));
+      assert.equal(rejected.status, status);
+      assert.equal(rejected.headers.get("Cache-Control"), "no-store");
+    }
+    assert.equal((await POST(request('{"gateEnabled":true}', "https://evil.test"))).status, 403);
+    assert.equal(writes, 1);
+  } finally {
+    loader._load = originalLoad;
+    delete require.cache[filename];
+    if (cached) require.cache[filename] = cached;
+  }
+});
+
+test("gate off bypasses score and cooldown but retains health halt and durable dedup", async () => {
+  const dir = await mkdtemp(join(process.cwd(), ".push-gate-test-"));
+  const delivered: string[] = [];
+  const options = { dir, configured: () => true, send: async (_sub: unknown, payload: string) => { delivered.push(JSON.parse(payload).tag); } };
+  const healthy = { diagnostics: { overall: "OK" }, gateEnabled: false };
+  try {
+    const service = createPushService(options);
+    await service.subscribe(subscription());
+    await service.publish([signal("baseline")], ["baseline"], healthy);
+    assert.deepEqual(await service.publish([signal("one"), signal("two")], ["one", "two"], healthy), { sent: 2, suppressed: 0 });
+    await assert.rejects(readFile(join(dir, "push-suppressed.json")), { code: "ENOENT" });
+    assert.deepEqual(await service.publish([signal("halt")], ["halt"], { gateEnabled: false, diagnostics: { overall: "DEGRADED" } }), { sent: 0, suppressed: 1 });
+    assert.equal(JSON.parse(await readFile(join(dir, "push-suppressed.json"), "utf8"))[0].reason, "DATA_UNHEALTHY");
+    const restarted = createPushService(options);
+    await restarted.publish([], [], healthy);
+    await restarted.publish([signal("one"), signal("two"), signal("halt")], ["one", "two", "halt"], healthy);
+    assert.deepEqual(delivered, ["one", "two"]);
+    assert.deepEqual(await restarted.publish([{ ...signal("cooldown"), score: 6 }], ["cooldown"], { ...healthy, gateEnabled: true }), { sent: 0, suppressed: 1 });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 
 test("subscription validation restricts push hosts, HTTPS, credentials, ports and key lengths", () => {
   assert.deepEqual(parseSubscription(subscription()), subscription());
