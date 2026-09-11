@@ -16,6 +16,7 @@ import { entryDecision, verdictClass } from "../lib/decision";
 import { AGGREGATE_LIMIT_PCT, AGGREGATE_WARN_PCT, exposureSummary } from "../lib/exposure";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 import { isMarketStale } from "../lib/signalFreshness";
+import { parseSignalRef, type SignalRef } from "../lib/deep-link";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
@@ -43,6 +44,9 @@ export default function Dashboard() {
   const [hideStale, setHideStale] = useState(false);
   const [loading, setLoading] = useState(false);
   const [chartCoin, setChartCoin] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<SignalRef | null>(null);
+  const [focusSignal, setFocusSignal] = useState<SignalRef | null>(null);
+  const [signalMiss, setSignalMiss] = useState(false);
   // "WS" once a frame actually arrives; "POLL" while the REST fallback drives prices.
   const [feed, setFeed] = useState<"WS" | "POLL" | "OFF">("OFF");
   const [tick, setTick] = useState<Date | null>(null);
@@ -159,6 +163,49 @@ export default function Dashboard() {
     return true;
   }), [rows, side, mode, minScore, hideStale, now]);
 
+  useEffect(() => {
+    const openSignal = (url: string) => {
+      try {
+        setFocusKey(parseSignalRef(new URL(url, window.location.href).searchParams.get("s")));
+        setFocusSignal(null);
+        setSignalMiss(false);
+      } catch { /* Ignore malformed notification URLs. */ }
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "open-signal" && typeof event.data.url === "string") openSignal(event.data.url);
+    };
+    openSignal(window.location.href);
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!focusKey || !updated) return;
+    const row = rows.find((r) => r.coin === focusKey.coin && r.signal_closed_at === focusKey.closed_at);
+    if (row) {
+      const card = document.getElementById(`signal-${row.coin}-${row.signal_closed_at}`);
+      if (!card) return; // Preserve filters; focus once the matching card is visible.
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFocusSignal(focusKey);
+    } else {
+      setSignalMiss(true);
+    }
+    setFocusKey(null);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [focusKey, rows, shown, updated]);
+
+  useEffect(() => {
+    if (!focusSignal) return;
+    const timer = setTimeout(() => setFocusSignal(null), 2500);
+    return () => clearTimeout(timer);
+  }, [focusSignal]);
+
+  useEffect(() => {
+    if (!signalMiss) return;
+    const timer = setTimeout(() => setSignalMiss(false), 6000);
+    return () => clearTimeout(timer);
+  }, [signalMiss]);
+
   const exposure = useMemo(() => exposureSummary(rows), [rows]);
   const exposureClass = { AMAN: "ok", WASPADA: "warn", "MELEBIHI BATAS": "bad", KOSONG: "muted" }[exposure.verdict];
   const setups = rows.filter((r) => r.sig).length;
@@ -213,12 +260,13 @@ export default function Dashboard() {
       <span className="updated">Last sync: {updated ? updated.toLocaleTimeString("id-ID") : "—"}</span>
     </nav>
 
+    {signalMiss && <p className="signalMiss" role="status">SINYAL TIDAK AKTIF · CEK HISTORY</p>}
     <section className="grid">{shown.length ? shown.map((r) => {
       const state = liveStatus(r, now);
       const entry = liveEntrySnapshot(r, r.price, now);
       const decision = entryDecision(r, r.price);
       const dead = state === "EXPIRED" || state === "INVALIDATED";
-      return <article className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}`} key={r.coin}>
+      return <article id={`signal-${r.coin}-${r.signal_closed_at}`} className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}${focusSignal?.coin === r.coin && focusSignal.closed_at === r.signal_closed_at ? " cardFocus" : ""}`} key={r.coin}>
         <div className="cardHead">
           <div>
             <span className="coin">{r.coin}<small>/USDT</small></span>

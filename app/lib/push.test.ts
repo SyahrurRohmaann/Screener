@@ -55,8 +55,8 @@ test("mutations compare the public proxy headers rather than the standalone URL"
   assert.equal(sameOriginMutation(req({ origin: "https://scansignal.my.id/", host: "scansignal.my.id" })), false);
 });
 
-test("push payload contains only a bounded signal summary and a fixed safe destination", () => {
-  assert.deepEqual(pushPayload(signal("BTC-123")), { title: "Sinyal baru: BTC LONG", body: "BTC LONG | skor 4", tag: "BTC-123", url: "/" });
+test("push payload contains a bounded signal summary and a signal deep-link", () => {
+  assert.deepEqual(pushPayload(signal("BTC-1726012345")), { title: "Sinyal baru: BTC LONG", body: "BTC LONG | skor 4", tag: "BTC-1726012345", url: "/?s=BTC-1726012345" });
 });
 
 test("durable subscription upsert/removal, silent baseline, actual-added filtering and restart dedupe", async () => {

@@ -75,6 +75,11 @@ html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
 .toastNote{margin:2px 0 0;font:var(--fs-2xs) 'DM Mono';color:var(--muted);text-align:right;opacity:.8}
 @keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
+.card.cardFocus{border-color:var(--gold);outline:1px solid var(--gold);outline-offset:2px;animation:cardFocusPulse 2s ease-in-out}
+@keyframes cardFocusPulse{0%,100%{box-shadow:0 0 0 0 rgba(233,189,112,0)}50%{box-shadow:0 0 20px 3px rgba(233,189,112,.22)}}
+.signalMiss{color:var(--muted);font:var(--fs-sm) 'DM Mono';padding:12px 0;margin:12px 0 0;text-align:center;border:1px solid var(--line)}
+@media(prefers-reduced-motion:reduce){.card.cardFocus{animation:none}}
+
 /* --- Inbox sinyal persisten --- */
 .inboxToggle{position:relative}.inboxToggle i{font-style:normal;display:inline-grid;place-items:center;
  min-width:17px;height:17px;padding:0 4px;margin-left:3px;border-radius:9px;background:var(--red);color:#fff;font:var(--fs-2xs) 'DM Mono'}

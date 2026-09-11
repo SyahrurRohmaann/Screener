@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import webPush from "web-push";
+import { signalHref } from "./deep-link";
 
 export type Subscription = { endpoint: string; keys: { p256dh: string; auth: string } };
 type PushSignal = { key: string; coin: string; sig: "LONG" | "SHORT"; score: number };
@@ -58,7 +59,7 @@ export function sameOriginMutation(request: Request) {
 
 export function pushPayload(signal: PushSignal) {
   const coin = signal.coin.slice(0, 20);
-  return { title: `Sinyal baru: ${coin} ${signal.sig}`, body: `${coin} ${signal.sig} | skor ${signal.score}`, tag: signal.key.slice(0, 100), url: "/" };
+  return { title: `Sinyal baru: ${coin} ${signal.sig}`, body: `${coin} ${signal.sig} | skor ${signal.score}`, tag: signal.key.slice(0, 100), url: signalHref(signal.key) };
 }
 
 export const pushConfigured = () => Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
