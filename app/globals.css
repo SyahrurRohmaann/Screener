@@ -15,6 +15,18 @@ html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
 .entryLive{margin:0 0 16px;padding:12px;background:#0c1016;border:1px solid var(--line);border-left:3px solid var(--gold)}
 .decision{border:1px solid var(--line);padding:10px 12px;margin-top:10px}
 .exposure{border:1px solid var(--line);padding:14px 16px;margin-top:26px}
+.reviewCard{border:1px solid var(--line);border-left:3px solid var(--gold);padding:14px 16px;margin:16px 0;font:var(--fs-sm) 'DM Mono';overflow-wrap:anywhere}
+.reviewCard h3{font:var(--fs-sm) 'DM Mono';letter-spacing:.8px;margin:0 0 12px;color:var(--gold)}
+.review-ok{border-left-color:var(--green)}.review-ok h3{color:var(--green)}
+.review-bad{border-left-color:var(--red)}.review-bad h3{color:var(--red)}
+.reviewMetrics{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:8px;color:var(--muted)}
+.reviewMetrics b{color:var(--text);margin-left:4px}
+.reviewActions{margin:14px 0 0;padding-left:24px}
+.reviewActions li{padding:10px 0;border-top:1px solid var(--line)}
+.reviewActions li::marker{color:var(--gold)}
+.reviewActions h4{font:inherit;color:var(--text);margin:0}
+.reviewActions p{color:var(--muted);line-height:1.6;margin:6px 0 0}
+.reviewActions strong{font-size:var(--fs-xs);color:var(--text)}
 .exposureHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font:var(--fs-sm) 'DM Mono'}
 .exposureHead span{font:var(--fs-xs) 'DM Mono';color:var(--muted);letter-spacing:.8px}
 .exposureHead>div{display:flex;align-items:center;flex-wrap:wrap;gap:6px 0}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { money, num } from "../lib/format";
 import { HISTORY_PAGE_SIZES, HISTORY_PAGE_SIZE_KEY, paginate } from "../lib/history-paging";
+import type { WeeklyReview } from "../lib/weekly-review";
 
 type Stats = {
   total: number; resolved: number; open: number; wins: number; losses: number;
@@ -31,6 +32,7 @@ type Payload = {
 
 const when = (ts: number) =>
   new Date(ts).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const reviewDate = (ts: number) => new Date(ts).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit" });
 
 const r = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}R`;
@@ -68,6 +70,8 @@ export default function History() {
   const [pageSize, setPageSize] = useState(50);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState(false);
+  const [review, setReview] = useState<WeeklyReview | null>(null);
+  const [reviewError, setReviewError] = useState(false);
   const requestId = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const prevHard = useRef("");
@@ -76,6 +80,25 @@ export default function History() {
     try { setPageSize(paginate(0, 1, localStorage.getItem(HISTORY_PAGE_SIZE_KEY)).pageSize); }
     catch { /* Storage may be unavailable. */ }
   }, []);
+
+  // Review is independent of table range and paging, but refreshes with HITUNG ULANG.
+  useEffect(() => {
+    if (!open) return;
+    const abort = new AbortController();
+    setReview(null);
+    setReviewError(false);
+    void (async () => {
+      try {
+        const response = await fetch("/api/review", { cache: "no-store", signal: abort.signal });
+        if (!response.ok) throw new Error("Review request failed");
+        const payload: WeeklyReview = await response.json();
+        if (!abort.signal.aborted) setReview(payload);
+      } catch {
+        if (!abort.signal.aborted) setReviewError(true);
+      }
+    })();
+    return () => abort.abort();
+  }, [open, revision]);
 
   function invalidate() {
     requestId.current += 1;
@@ -136,6 +159,26 @@ export default function History() {
     </div>
 
     {open && <>
+      <section className={`reviewCard ${review ? review.metrics.closed < 5 ? "review-warn" : review.metrics.net_r < 0 ? "review-bad" : "review-ok" : "review-warn"}`} aria-label="Review mingguan" aria-busy={!review && !reviewError}>
+        <h3>REVIEW MINGGUAN{review && ` · ${reviewDate(review.period_start)}–${reviewDate(review.period_end)}`}</h3>
+        {reviewError && <p className="calcEmpty" role="alert">Gagal memuat review. Gunakan HITUNG ULANG untuk mencoba lagi.</p>}
+        {!review && !reviewError && <p className="calcEmpty">Menghitung review mingguan…</p>}
+        {review && <>
+          <div className="reviewMetrics">
+            <span>CLOSED <b>{review.metrics.closed}</b></span>
+            <span>WR <b>{review.metrics.wr_pct == null ? "—" : `${num(review.metrics.wr_pct, 1)}%`}</b></span>
+            <span>NET R <b className={review.metrics.net_r < 0 ? "red" : "green"}>{r(review.metrics.net_r, 1)}</b></span>
+            <span>vs MINGGU LALU <b>{r(review.metrics.prev_net_r, 1)}</b></span>
+          </div>
+          <div className="reviewMetrics">{review.metrics.by_dir.map((side) => <span key={side.dir}>
+            {side.dir} <b>{side.n} CLOSED · {side.wr_pct == null ? "—" : `${num(side.wr_pct, 1)}%`} WR · <span className={side.net_r < 0 ? "red" : "green"}>{r(side.net_r, 1)}</span></b>
+          </span>)}</div>
+          {!review.metrics.closed && <p className="calcEmpty">Belum ada trade selesai dalam 7 hari terakhir.</p>}
+          <ol className="reviewActions">{review.actions.map((action) => <li key={action.title}>
+            <h4>{action.title}</h4><p>{action.why}</p><p><strong>CEK MINGGU DEPAN:</strong> {action.check}</p>
+          </li>)}</ol>
+        </>}
+      </section>
       <div className="rangeBtns" aria-label="Rentang history">
         {(["30", "60", "90", "all"] as Range[]).map((value) =>
           <button key={value} className={range === value ? "active" : ""} onClick={() => {
