@@ -21,7 +21,8 @@ const HEADLINE: Record<string, string> = {
  * derived from upstream calls that can partially fail, and a silent partial failure
  * looks exactly like a calm market. This panel makes the difference visible.
  */
-export default function DataHealth({ market, context, price }: {
+export default function DataHealth({ market, context, price, engine }: {
+  engine?: "reverse" | "ori";
   market: MarketDiagnostics | null;
   context: ContextDiagnostics | null;
   price: PriceDiagnostics | null;
@@ -44,6 +45,9 @@ export default function DataHealth({ market, context, price }: {
       <small>{HEADLINE[summary.overall] ?? HEADLINE.UNKNOWN}</small>
       <i aria-hidden="true">{open ? "TUTUP ▲" : "RINCIAN ▼"}</i>
     </button>
+    {engine && <p className="healthNote">{engine === "reverse"
+      ? "MESIN: REVERSE — sinyal dicerminkan dari mesin ori (SL/TP di-refleksi)"
+      : "MESIN: ORI"}</p>}
 
     {open && <div className="healthBody">
       <ul className="healthList">

@@ -2,9 +2,19 @@ import { candles, type Market } from "./indicators";
 import { summarize, type Evaluated, type Outcome } from "./evaluate";
 import type { SignalRecord } from "./store";
 import type { HistoryRange } from "./history-analytics";
+import type { Plan } from "./format";
 
-export function reverseSide<T extends "LONG" | "SHORT" | "WAIT">(side: T): "LONG" | "SHORT" | "WAIT" {
+export function reverseSide<T extends "LONG" | "SHORT" | "WAIT">(side: T): T extends "WAIT" ? "WAIT" : "LONG" | "SHORT";
+export function reverseSide(side: "LONG" | "SHORT" | "WAIT"): "LONG" | "SHORT" | "WAIT" {
   return side === "LONG" ? "SHORT" : side === "SHORT" ? "LONG" : "WAIT";
+}
+
+export function mirrorPlan(plan: Plan, pivot: number): Plan {
+  // Reflection reverses interval order. Entry stays at pivot, so
+  // |(2E - stop) - E| = |stop - E| preserves risk_pct and reward/risk.
+  return { ...plan, entry_low: 2 * pivot - plan.entry_high,
+    entry_high: 2 * pivot - plan.entry_low, invalidation: 2 * pivot - plan.invalidation,
+    tp1: 2 * pivot - plan.tp1, tp2: 2 * pivot - plan.tp2 };
 }
 
 export function reverseRecord(record: SignalRecord): SignalRecord {

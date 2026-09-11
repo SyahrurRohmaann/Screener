@@ -5,6 +5,7 @@ import { buildMarketDiagnostics } from "./diagnostics";
 import { liveStatus } from "./format";
 import { pushService } from "./push";
 import { singleFlight } from "./scanWorker";
+import { mirrorPlan, reverseSide } from "./reverse";
 
 const COINS = (process.env.SCREENER_COINS ?? "BTC,ETH,SOL,XRP,BNB,DOGE,ADA,AVAX,LINK,DOT")
   .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
@@ -56,6 +57,7 @@ function pattern(data: Market, i: number, bullish: boolean) {
 }
 
 async function analyze(coin: string, counter: ApiCounter) {
+  const REVERSE = process.env.SCREENER_REVERSE === "1";
   const [m30, m1h] = await Promise.all([candles(coin, "30m", 200, counter), candles(coin, "1h", 100, counter)]);
   if (!m30 || !m1h) return { coin, error: "data unavailable" };
   const i = m30.c.length - 1;
@@ -84,7 +86,7 @@ async function analyze(coin: string, counter: ApiCounter) {
   const close = m30.c[i];
   const a = atr(m30, 14);
   const atrPct = Number.isFinite(a) ? (a / close) * 100 : null;
-  const mode: "TREND" | "COUNTER" | null = sig
+  let mode: "TREND" | "COUNTER" | null = sig
     ? ((sig === "LONG" && bullish1h) || (sig === "SHORT" && !bullish1h) ? "TREND" : "COUNTER")
     : null;
 
@@ -117,6 +119,14 @@ async function analyze(coin: string, counter: ApiCounter) {
     }
   }
 
+  const oriSig = sig;
+  if (REVERSE && sig) {
+    if (plan) plan = mirrorPlan(plan, sig === "LONG" ? plan.entry_high : plan.entry_low);
+    sig = reverseSide(sig);
+    mode = mode === "TREND" ? "COUNTER" : mode === "COUNTER" ? "TREND" : null;
+    reasons.push(`REVERSE dari sinyal ${oriSig}`);
+  }
+
   const closedAt = m30.t[i];
   const micro = await microstructure(coin, counter);
   const ageMin = Math.max(0, (Date.now() - closedAt) / 60000);
@@ -128,6 +138,8 @@ async function analyze(coin: string, counter: ApiCounter) {
 
   return {
     coin, price: close, sig, score, reasons, mode, status,
+    engine: REVERSE ? "reverse" as const : "ori" as const,
+    ...(REVERSE ? { ori_sig: oriSig } : {}),
     signal_closed_at: closedAt, age_min: Math.floor(ageMin),
     atr: Number.isFinite(a) ? a : null, atr_pct: atrPct,
     plan, rsi: r[i], trend_1h: bullish1h ? "BULL" : "BEAR", timeframe: "30m",
@@ -136,6 +148,7 @@ async function analyze(coin: string, counter: ApiCounter) {
 }
 
 async function runScan() {
+  const REVERSE = process.env.SCREENER_REVERSE === "1";
   const counter = createApiCounter();
   // Clock drift must be stamped immediately around the /fapi/v1/time response, not
   // after the 60-call scan resolves: otherwise the scan duration is misread as skew
@@ -192,6 +205,7 @@ async function runScan() {
 
   return {
     source: "binance-futures", ts: now, min_score: MIN_SCORE,
+    engine: REVERSE ? "reverse" as const : "ori" as const,
     logged: historyWrite.added, history_write: historyWrite,
     diagnostics, rows,
   };

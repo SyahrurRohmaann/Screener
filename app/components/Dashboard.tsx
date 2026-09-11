@@ -32,6 +32,7 @@ const MODES = ["ALL", "TREND", "COUNTER"] as const;
 
 export default function Dashboard() {
   const [rows, setRows] = useState<Row[]>(demo);
+  const [engine, setEngine] = useState<Row["engine"]>();
   const [updated, setUpdated] = useState<Date | null>(null);
   const [marketTs, setMarketTs] = useState<number | null>(null);
   const [side, setSide] = useState<(typeof SIDES)[number]>("ALL");
@@ -66,6 +67,7 @@ export default function Dashboard() {
         ...r, price: r.mark != null && Number.isFinite(r.mark) && r.mark > 0 ? r.mark : r.price,
       })));
       setMarketTs(typeof data.ts === "number" ? data.ts : null);
+      setEngine(data.engine);
       setMarketHealth(data.diagnostics ?? null);
       setUpdated(new Date());
     } catch { /* keep the previous rows rather than blanking the screen */ }
@@ -171,7 +173,7 @@ export default function Dashboard() {
     </header>
 
     <AccountPanel scaleControl={<ScaleControl />} />
-    <DataHealth market={marketHealth} context={contextHealth} price={priceHealth} />
+    <DataHealth market={marketHealth} context={contextHealth} price={priceHealth} engine={engine} />
     <SignalAlerts rows={rows} onOpenSignal={setChartCoin} />
 
     <section className="hero">
@@ -217,7 +219,8 @@ export default function Dashboard() {
             <span className="coin">{r.coin}<small>/USDT</small></span>
             <span className="contract">PERPETUAL · 30M</span>
           </div>
-          <span className={`badge ${r.sig?.toLowerCase() ?? "wait"}`}>{r.sig ?? "WAIT"}</span>
+          <div className="tags"><span className={`badge ${r.sig?.toLowerCase() ?? "wait"}`}>{r.sig ?? "WAIT"}</span>
+            {r.engine === "reverse" && r.sig && <span className="tag">REV</span>}</div>
         </div>
 
         <div className="price">{money(r.price)}<span>MARK PRICE · {feed === "WS" ? "WEBSOCKET" : feed === "POLL" ? "POLLING 3S" : "MENUNGGU"}</span></div>

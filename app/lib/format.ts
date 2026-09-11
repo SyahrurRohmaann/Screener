@@ -6,6 +6,7 @@ export type Plan = {
 };
 
 export type Row = {
+  engine?: "reverse" | "ori"; ori_sig?: "LONG" | "SHORT" | null;
   coin: string; price: number; sig?: "LONG" | "SHORT" | null; score: number; rsi: number;
   trend_1h: string; timeframe?: string; mode?: "TREND" | "COUNTER" | null; status?: string;
   age_min?: number; atr?: number | null; atr_pct?: number | null; plan?: Plan | null; reasons?: string[];

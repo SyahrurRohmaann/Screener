@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareReverse, replayPaper, reverseRecord, reverseSide } from "./reverse";
+import { compareReverse, mirrorPlan, replayPaper, reverseRecord, reverseSide } from "./reverse";
 import type { SignalRecord } from "./store";
 import type { Market } from "./indicators";
 
@@ -11,6 +11,26 @@ const record: SignalRecord = { key: "BTC-1799999", coin: "BTC", sig: "LONG", sco
 const market = (high = 105, low = 95, close = 100): Market => ({
   o: [100, 100], h: [101, high], l: [99, low], c: [100, close],
   v: [1, 1], t: [1799999, 3599999] });
+
+test("mirrorPlan preserves risk, valid geometry and round trips in both directions", () => {
+  const long = { entry_low: 98, entry_high: 100, invalidation: 90,
+    tp1: 110, tp2: 120, risk_pct: 10, rr1: 1, rr2: 2 };
+  const short = { ...long, entry_low: 100, entry_high: 102, invalidation: 110, tp1: 90, tp2: 80 };
+  assert.deepEqual(mirrorPlan(long, 100), short);
+  assert.deepEqual(mirrorPlan(short, 100), long);
+  for (const plan of [long, short]) {
+    const mirrored = mirrorPlan(plan, 100);
+    assert.ok(mirrored.entry_low < mirrored.entry_high);
+    assert.ok(mirrored.invalidation > mirrored.entry_high
+      ? mirrored.tp2 < mirrored.tp1 && mirrored.tp1 < mirrored.entry_low
+      : mirrored.invalidation < mirrored.entry_low && mirrored.tp2 > mirrored.tp1 && mirrored.tp1 > mirrored.entry_high);
+    assert.equal(Math.abs(mirrored.invalidation - 100), Math.abs(plan.invalidation - 100));
+    assert.equal(mirrored.risk_pct, plan.risk_pct);
+    assert.equal(mirrored.rr1, plan.rr1);
+    assert.equal(mirrored.rr2, plan.rr2);
+    assert.deepEqual(mirrorPlan(mirrored, 100), plan);
+  }
+});
 
 test("reverse sides including WAIT; reflected percentages and original evidence stay intact", () => {
   assert.equal(reverseSide("WAIT"), "WAIT");

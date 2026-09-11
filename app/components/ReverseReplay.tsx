@@ -6,6 +6,7 @@ import type { Evaluated, Stats } from "../lib/evaluate";
 import { priceStr } from "../lib/format";
 
 type Range = "30" | "60" | "90" | "all";
+const labels = { original: "MESIN AKTIF (REVERSE)", reverse: "MESIN ORI (SEBELUM DIBALIK)" };
 type Comparison = { stats: Stats; outcomes: { outcome: string; count: number }[] };
 type Payload = {
   ts: number; range: Range; evidence: "RETROSPECTIVE_REPLAY";
@@ -78,7 +79,7 @@ export default function ReverseReplay() {
 
   return <section className="reverseReplay" aria-labelledby="reverse-results">
     <div className="reverseToolbar">
-      <h2 id="reverse-results">Original vs reverse</h2>
+      <h2 id="reverse-results">Mesin aktif vs mesin ori</h2>
       <div className="reverseControls" role="group" aria-label="Rentang replay">
         {(["30", "60", "90", "all"] as const).map((value) => <button type="button" key={value}
           aria-pressed={range === value} onClick={() => reload(value)}>
@@ -99,7 +100,7 @@ export default function ReverseReplay() {
         <div className="reversePanel">
           <div className="reverseScroll" role="region" aria-label="Perbandingan statistik" tabIndex={0}>
             <table className="reverseComparison"><caption>Statistik seluruh record dalam rentang, bukan hanya 120 pasangan di bawah.</caption>
-              <thead><tr><th scope="col">Metrik</th><th scope="col">ORIGINAL</th><th scope="col">REVERSE</th></tr></thead>
+              <thead><tr><th scope="col">Metrik</th><th scope="col">{labels.original}</th><th scope="col">{labels.reverse}</th></tr></thead>
               <tbody>{metrics.map(({ label, key, suffix, digits }) => <tr key={key}>
                 <th scope="row">{label}</th>
                 <td>{number(data.original.stats[key], suffix, digits)}</td>
@@ -111,13 +112,13 @@ export default function ReverseReplay() {
           {(data.original.stats.resolved < 30 || data.reverse.stats.resolved < 30) && <p className="reverseCaution">Sampel resolved salah satu atau kedua sisi di bawah 30. Jangan anggap perbedaan ini sebagai edge.</p>}
         </div>
         <div className="reverseOutcomes">{(["original", "reverse"] as const).map((side) => <section className="reversePanel" key={side}>
-          <h3>OUTCOMES / {side.toUpperCase()}</h3>
+          <h3>OUTCOMES / {labels[side]}</h3>
           {data[side].outcomes.length ? <dl>{data[side].outcomes.map((item) => <div key={item.outcome}><dt>{item.outcome}</dt><dd>{item.count}</dd></div>)}</dl> : <p className="reverseMeta">Tidak ada outcome.</p>}
         </section>)}</div>
         <section className="reversePanel">
           <h3>PER RECORD / {Math.min(data.rows.length, 120)} DARI {data.total} PASANGAN</h3>
           <p className="reverseMeta">Maksimal 120 pasangan ditampilkan. Level adalah rencana hipotetis, bukan order live. Harga dalam USDT; waktu UTC.</p>
-          {data.rows.length ? <div className="reverseScroll" role="region" aria-label="Pasangan record original dan reverse, geser untuk melihat semua kolom" tabIndex={0}>
+          {data.rows.length ? <div className="reverseScroll" role="region" aria-label="Pasangan record mesin aktif dan mesin ori, geser untuk melihat semua kolom" tabIndex={0}>
             <table className="reverseRecords"><thead><tr>
               {["Waktu sinyal (UTC)", "Coin", "Replay", "Side", "Entry", "Stop", "TP1", "TP2", "Outcome", "Net R"].map((label) => <th scope="col" key={label}>{label}</th>)}
             </tr></thead>
@@ -126,7 +127,7 @@ export default function ReverseReplay() {
                   const row = pair[side];
                   return <tr key={side}>
                     {index === 0 && <><td rowSpan={2}>{when(pair.original.signal_closed_at)}</td><th scope="rowgroup" rowSpan={2}>{pair.original.coin}</th></>}
-                    <th scope="row">{side.toUpperCase()}</th><td>{row.sig}</td>
+                    <th scope="row">{labels[side]}</th><td>{row.sig}</td>
                     <td>{price(row.entry)}</td><td>{price(row.stop)}</td><td>{price(row.tp1)}</td><td>{price(row.tp2)}</td>
                     <td>{row.outcome}</td><td>{number(row.net_r, "R")}</td>
                   </tr>;
