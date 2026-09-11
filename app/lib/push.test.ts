@@ -103,3 +103,67 @@ test("missing config is a no-write no-send path; failures are isolated, expired 
     assert.equal(remaining.length, 3);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("gated publish persists cooldown across calls and restarts, audits suppression and retains legacy delivery", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "screener-push-gate-"));
+  const delivered: string[] = [];
+  const options = { dir, configured: () => true, send: async (_sub: unknown, payload: string) => { delivered.push(JSON.parse(payload).tag); } };
+  const healthy = { diagnostics: { overall: "OK" } };
+  const top = (key: string, coin = "BTC") => ({ ...signal(key), coin, score: 6, atr_pct: 1 });
+  try {
+    const service = createPushService(options);
+    await service.subscribe(subscription());
+    assert.deepEqual(await service.publish([top("baseline")], ["baseline"], healthy), { sent: 0, suppressed: 0 });
+    await assert.rejects(readFile(join(dir, "push-last-sent.json")), { code: "ENOENT" });
+    const before = Date.now();
+    assert.deepEqual(await service.publish([signal("low"), top("first"), top("same-batch")], ["low", "first", "same-batch"], healthy), { sent: 1, suppressed: 2 });
+    const lastSentAt = JSON.parse(await readFile(join(dir, "push-last-sent.json"), "utf8"));
+    assert.ok(lastSentAt.BTC >= before && lastSentAt.BTC <= Date.now());
+    assert.deepEqual(await service.publish([top("second"), top("eth", "ETH")], ["second", "eth"], healthy), { sent: 1, suppressed: 1 });
+    const restarted = createPushService(options);
+    await restarted.publish([], [], healthy);
+    assert.deepEqual(await restarted.publish([top("restart")], ["restart"], healthy), { sent: 0, suppressed: 1 });
+    assert.deepEqual(await restarted.publish([signal("legacy-1"), signal("legacy-2")], ["legacy-1", "legacy-2"]), { sent: 2, suppressed: 0 });
+    assert.deepEqual(delivered, ["first", "eth", "legacy-1", "legacy-2"]);
+    const audit = JSON.parse(await readFile(join(dir, "push-suppressed.json"), "utf8"));
+    assert.deepEqual(audit.map((item: { key: string; reason: string }) => [item.key, item.reason]), [
+      ["low", "LOW_SCORE"], ["same-batch", "COOLDOWN"], ["second", "COOLDOWN"], ["restart", "COOLDOWN"],
+    ]);
+    assert.equal(audit[0].coin, "BTC");
+    assert.equal(audit[0].ts, lastSentAt.BTC);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("unhealthy publish sends nothing, bounds the persisted audit to 500 and never replays suppressed keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "screener-push-gate-"));
+  try {
+    const service = createPushService({ dir, configured: () => true, send: async () => { assert.fail("send forbidden"); } });
+    await service.subscribe(subscription());
+    await service.publish([], []);
+    const signals = Array.from({ length: 501 }, (_, i) => ({ ...signal(`halt-${i}`), score: 6 }));
+    assert.deepEqual(await service.publish(signals, signals.map((s) => s.key), { diagnostics: { overall: "OK", candle: { missingCoins: ["ETH"] } } }), { sent: 0, suppressed: 501 });
+    const audit = JSON.parse(await readFile(join(dir, "push-suppressed.json"), "utf8"));
+    assert.equal(audit.length, 500);
+    assert.equal(audit[0].key, "halt-1");
+    assert.equal(audit[499].reason, "DATA_UNHEALTHY");
+    assert.deepEqual(await service.publish(signals, signals.map((s) => s.key), { diagnostics: { overall: "OK" } }), { sent: 0, suppressed: 0 });
+    await assert.rejects(readFile(join(dir, "push-last-sent.json")), { code: "ENOENT" });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("failed delivery and no subscribers do not start cooldown", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "screener-push-gate-"));
+  let attempts = 0;
+  try {
+    const service = createPushService({ dir, configured: () => true, send: async () => { attempts++; throw new Error("offline"); } });
+    const healthy = { diagnostics: { overall: "OK" } };
+    await service.publish([], []);
+    assert.deepEqual(await service.publish([{ ...signal("no-subs"), score: 6 }], ["no-subs"], healthy), { sent: 0, suppressed: 0 });
+    await service.subscribe(subscription());
+    for (const key of ["failed-1", "failed-2"]) {
+      assert.deepEqual(await service.publish([{ ...signal(key), score: 6 }], [key], healthy), { sent: 0, suppressed: 0 });
+    }
+    assert.equal(attempts, 2);
+    await assert.rejects(readFile(join(dir, "push-last-sent.json")), { code: "ENOENT" });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

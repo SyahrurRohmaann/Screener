@@ -2,9 +2,10 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import webPush from "web-push";
 import { signalHref } from "./deep-link";
+import { gatePushSignals, toGateDiagnostics, type GateResult } from "./push-gate";
 
 export type Subscription = { endpoint: string; keys: { p256dh: string; auth: string } };
-type PushSignal = { key: string; coin: string; sig: "LONG" | "SHORT"; score: number };
+type PushSignal = { key: string; coin: string; sig: "LONG" | "SHORT"; score: number; atr_pct?: number | null };
 
 export function validPushEndpoint(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2048) return false;
@@ -101,8 +102,9 @@ export function createPushService(options: {
       if (!validPushEndpoint(endpoint)) throw new Error("invalid_subscription");
       await save("push-subscriptions.json", (await subscriptions()).filter((sub) => sub.endpoint !== endpoint));
     }),
-    publish: (candidates: PushSignal[], addedKeys: string[]) => exclusive(async () => {
-      if (!options.configured()) return;
+    publish: (candidates: PushSignal[], addedKeys: string[], opts?: { diagnostics?: unknown }) => exclusive(async () => {
+      const result = { sent: 0, suppressed: 0 };
+      if (!options.configured()) return result;
       if (!sent) sent = new Set(await load<string[]>("push-sent.json", []));
       const added = new Set(addedKeys);
       const fresh = candidates.filter((signal) => added.has(signal.key) && !sent!.has(signal.key));
@@ -113,10 +115,23 @@ export function createPushService(options: {
       if (fresh.length) await save("push-sent.json", Array.from(next).slice(-4000));
       sent = new Set(Array.from(next).slice(-4000));
       baseline = false;
-      if (silent || !fresh.length) return;
+      if (silent || !fresh.length) return result;
+      const now = Date.now();
+      const lastSentAt = await load<Record<string, number>>("push-last-sent.json", {});
+      const diagnostics = toGateDiagnostics(opts?.diagnostics);
+      const suppressed: { key: string; coin: string; ts: number; reason: GateResult["suppressed"][number]["reason"] }[] = [];
       const all = await subscriptions();
       const expired = new Set<string>();
       for (const signal of fresh) {
+        // Evaluate sequentially so a successful send also cools down this batch.
+        if (opts?.diagnostics !== undefined) {
+          const gate = gatePushSignals({ signals: [{ ...signal, atr_pct: signal.atr_pct }], diagnostics, now, lastSentAt });
+          if (gate.suppressed.length) {
+            suppressed.push({ key: signal.key, coin: signal.coin, ts: now, reason: gate.suppressed[0].reason });
+            continue;
+          }
+        }
+        let delivered = false;
         await Promise.all(all.filter((sub) => !expired.has(sub.endpoint)).map(async (sub) => {
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
@@ -124,13 +139,25 @@ export function createPushService(options: {
               options.send(sub, JSON.stringify(pushPayload(signal))),
               new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("push_timeout")), options.timeoutMs ?? 5000); }),
             ]);
+            delivered = true;
           } catch (error) {
             const status = (error as { statusCode?: number })?.statusCode;
             if (status === 404 || status === 410) expired.add(sub.endpoint);
           } finally { if (timer) clearTimeout(timer); }
         }));
+        if (delivered) {
+          result.sent++;
+          lastSentAt[signal.coin] = now;
+          await save("push-last-sent.json", lastSentAt);
+        }
       }
+      if (suppressed.length) {
+        const previous = await load<typeof suppressed>("push-suppressed.json", []);
+        await save("push-suppressed.json", [...previous, ...suppressed].slice(-500));
+      }
+      result.suppressed = suppressed.length;
       if (expired.size) await save("push-subscriptions.json", all.filter((sub) => !expired.has(sub.endpoint)));
+      return result;
     }),
   };
 }

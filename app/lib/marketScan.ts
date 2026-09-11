@@ -187,11 +187,6 @@ async function runScan() {
     }];
   });
   const historyWrite = await recordSignals(candidates);
-  // Delivery failures must not turn a successful market scan into an API error.
-  void pushService().publish(candidates, historyWrite.addedKeys ?? []).catch(() => {
-    console.warn("Signal push persistence failed");
-  });
-
   const diagnostics = buildMarketDiagnostics({
     now,
     expectedCoins: COINS,
@@ -201,6 +196,10 @@ async function runScan() {
     api: counter.counts(),
     historyWrite,
     serverTimeMs,
+  });
+  // Delivery failures must not turn a successful market scan into an API error.
+  void pushService().publish(candidates, historyWrite.addedKeys ?? [], { diagnostics }).catch(() => {
+    console.warn("Signal push persistence failed");
   });
 
   return {

@@ -18,7 +18,12 @@ test("scan flips analyzed rows and downstream candidates only for SCREENER_REVER
   resetHistoryCache();
   let candidates: SignalRecord[] = [];
   let published: unknown;
-  t.mock.method(pushService(), "publish", async (rows: SignalRecord[]) => { published = rows; candidates = rows; });
+  let publishedDiagnostics: unknown;
+  let publishedKeys: string[] = [];
+  t.mock.method(pushService(), "publish", async (rows: SignalRecord[], keys: string[], opts?: { diagnostics?: unknown }) => {
+    published = rows; candidates = rows; publishedKeys = keys; publishedDiagnostics = opts?.diagnostics;
+    return { sent: 0, suppressed: 0 };
+  });
   t.mock.method(globalThis, "fetch", async (input: string) => {
     const url = new URL(input);
     let body: unknown = [];
@@ -39,6 +44,8 @@ test("scan flips analyzed rows and downstream candidates only for SCREENER_REVER
     delete process.env.SCREENER_REVERSE;
     const original = await scanMarket();
     const originalCandidates = candidates;
+    assert.equal(publishedDiagnostics, original.diagnostics);
+    assert.deepEqual(publishedKeys, original.history_write.addedKeys ?? []);
     assert.equal(original.engine, "ori");
     assert.ok(originalCandidates.some(r => r.sig === "LONG"));
     assert.ok(originalCandidates.some(r => r.sig === "SHORT"));
@@ -46,6 +53,8 @@ test("scan flips analyzed rows and downstream candidates only for SCREENER_REVER
 
     process.env.SCREENER_REVERSE = "1";
     const reversed = await scanMarket();
+    assert.equal(publishedDiagnostics, reversed.diagnostics);
+    assert.deepEqual(publishedKeys, reversed.history_write.addedKeys ?? []);
     assert.equal(reversed.engine, "reverse");
     for (let i = 0; i < reversed.rows.length; i++) {
       const row = reversed.rows[i];
