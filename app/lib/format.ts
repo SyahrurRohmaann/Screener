@@ -19,10 +19,23 @@ export type Bar = {
   ema50: number | null; rsi: number | null; mavol5: number | null; mavol14: number | null;
 };
 
+export function priceDigits(n: number): number {
+  n = Math.abs(n);
+  if (!Number.isFinite(n) || n === 0) return 0;
+  return n < 1
+    ? Math.min(12, 3 - Math.floor(Math.log10(n)))
+    : Math.max(2, 4 - (Math.floor(Math.log10(n)) + 1));
+}
+
+export const priceStr = (n: number | null | undefined): string =>
+  n == null || !Number.isFinite(n) || n === 0
+    ? "—"
+    : n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: priceDigits(n) });
+
 export const money = (n?: number | null) =>
   n == null || !Number.isFinite(n) || n === 0
     ? "—"
-    : `$${n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 6 : 2 })}`;
+    : `$${priceStr(n)}`;
 
 export const pct = (n?: number | null) =>
   n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(3)}%`;

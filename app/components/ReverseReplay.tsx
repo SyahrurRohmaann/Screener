@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Evaluated, Stats } from "../lib/evaluate";
+import { priceStr } from "../lib/format";
 
 type Range = "30" | "60" | "90" | "all";
 type Comparison = { stats: Stats; outcomes: { outcome: string; count: number }[] };
@@ -16,8 +17,7 @@ type Payload = {
 const number = (value: number | null | undefined, suffix = "", digits = 2) =>
   value == null || !Number.isFinite(value) ? "N/A" : `${value.toFixed(digits)}${suffix}`;
 const when = (ts: number) => new Date(ts).toLocaleString("id-ID", { timeZone: "UTC" });
-const price = (value: number) => Number.isFinite(value)
-  ? value.toLocaleString("en-US", { maximumSignificantDigits: 10 }) : "N/A";
+const price = (value: number) => Number.isFinite(value) && value > 0 ? priceStr(value) : "N/A";
 
 const metrics: { label: string; key: keyof Stats; suffix?: string; digits?: number }[] = [
   { label: "Total record", key: "total", digits: 0 },

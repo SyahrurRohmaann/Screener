@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { entryStatus, liveEntrySnapshot, levelPct, planEntry, type Plan, type Row } from "./format";
+import { entryStatus, liveEntrySnapshot, levelPct, planEntry, type Plan, type Row, money, priceDigits, priceStr } from "./format";
 
 const plan: Plan = {
   entry_low: 99, entry_high: 100, invalidation: 98,
@@ -93,4 +93,47 @@ test("countdown uses the next UTC-aligned 30m boundary", () => {
   const born = liveEntrySnapshot({ ...row("LONG"), signal_closed_at: Date.UTC(2026, 7, 29, 12, 0) }, 100, Date.UTC(2026, 7, 29, 12, 17, 45));
   assert.equal(born?.signal_age_min, 17);
   assert.equal(liveEntrySnapshot(row("LONG"), 100, Date.UTC(2026, 7, 29, 12, 30))?.next_candle_ms, 30 * 60_000);
+});
+
+test("priceDigits chooses decimal precision for four significant digits", () => {
+  assert.equal(priceDigits(0.11847), 4);
+  assert.equal(priceDigits(0.011847), 5);
+  assert.equal(priceDigits(0.00011847), 7);
+  assert.equal(priceDigits(2.8456), 3);
+  assert.equal(priceDigits(45.234), 2);
+  assert.equal(priceDigits(117845.23), 2);
+});
+
+test("priceDigits caps decimal precision and handles magnitude boundaries", () => {
+  assert.equal(priceDigits(1e-15), 12);
+  assert.equal(priceDigits(1), 3);
+  assert.equal(priceDigits(10), 2);
+  assert.equal(priceDigits(100), 2);
+  assert.equal(priceDigits(1000), 2);
+  assert.equal(priceDigits(-2.8456), 3);
+  for (const value of [0, NaN, Infinity, -Infinity]) {
+    assert.equal(priceDigits(value), 0);
+  }
+});
+
+test("money rounds prices with a dollar prefix and en-US grouping", () => {
+  assert.equal(money(0.11847), "$0.1185");
+  assert.equal(money(2.8456), "$2.846");
+  assert.equal(money(117845.23), "$117,845.23");
+  assert.equal(money(0.00011847), "$0.0001185");
+  assert.equal(money(-2.8456), "$-2.846");
+  assert.equal(money(1), "$1");
+});
+
+test("priceStr uses the same precision without a dollar prefix", () => {
+  assert.equal(priceStr(0.011847), "0.01185");
+  assert.equal(priceStr(117845.23), "117,845.23");
+  assert.equal(priceStr(1), "1");
+});
+
+test("money and priceStr return a placeholder for missing, non-finite, and zero values", () => {
+  for (const value of [null, undefined, NaN, Infinity, -Infinity, 0]) {
+    assert.equal(money(value), "\u2014");
+    assert.equal(priceStr(value), "\u2014");
+  }
 });
