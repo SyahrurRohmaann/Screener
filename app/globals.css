@@ -13,6 +13,14 @@ html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
 
 /* --- Status entry realtime --- */
 .entryLive{margin:0 0 16px;padding:12px;background:#0c1016;border:1px solid var(--line);border-left:3px solid var(--gold)}
+.decision{border:1px solid var(--line);padding:10px 12px;margin-top:10px}
+.decisionHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font:var(--fs-sm) 'DM Mono'}
+.decisionHead span{font:var(--fs-xs) 'DM Mono';color:var(--muted);letter-spacing:.8px}
+.decisionGrid{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font:var(--fs-sm) 'DM Mono'}
+.decisionGrid span{color:var(--muted)}.decisionGrid b{color:var(--text);margin-left:4px}
+.decision p{font:var(--fs-sm) 'DM Mono';color:var(--muted);margin:8px 0 0;line-height:1.6}
+.decision .decisionNote{font-size:var(--fs-2xs)}
+.d-ok .decisionHead b{color:var(--green)}.d-warn .decisionHead b{color:var(--gold)}.d-bad .decisionHead b{color:var(--red)}
 .entryLive.es-dalam-zona-valid{border-left-color:var(--green)}.entryLive.es-invalid{border-left-color:var(--red)}
 .entryLiveHead,.progressHead,.entryClock{display:flex;justify-content:space-between;gap:10px;align-items:center;font:var(--fs-xs) 'DM Mono';color:var(--muted)}
 .entryLiveHead b{font-size:var(--fs-sm);color:var(--text)}.es-dalam-zona-valid .entryLiveHead b{color:var(--green)}.es-invalid .entryLiveHead b{color:var(--red)}

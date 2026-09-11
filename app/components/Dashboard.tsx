@@ -12,6 +12,7 @@ import DataHealth from "./DataHealth";
 import ScaleControl from "./ScaleControl";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
+import { entryDecision, verdictClass } from "../lib/decision";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 import { isMarketStale } from "../lib/signalFreshness";
 
@@ -212,6 +213,7 @@ export default function Dashboard() {
     <section className="grid">{shown.length ? shown.map((r) => {
       const state = liveStatus(r, now);
       const entry = liveEntrySnapshot(r, r.price, now);
+      const decision = entryDecision(r, r.price);
       const dead = state === "EXPIRED" || state === "INVALIDATED";
       return <article className={`card ${r.sig?.toLowerCase() ?? "neutral"}${dead ? " stale" : ""}`} key={r.coin}>
         <div className="cardHead">
@@ -253,6 +255,17 @@ export default function Dashboard() {
               <span>CANDLE 30M BERIKUT <b>{Math.floor((entry.next_candle_ms ?? 0) / 60_000).toString().padStart(2, "0")}:{Math.floor(((entry.next_candle_ms ?? 0) % 60_000) / 1000).toString().padStart(2, "0")}</b></span>
             </div>
             {entry.status === "TERLAMBAT" && <p>Informasi posisi harga saja; belum ada cutoff chase yang tervalidasi.</p>}
+          </div>}
+          {decision && <div className={`decision d-${verdictClass(decision.verdict)}`}>
+            <div className="decisionHead"><span>KEPUTUSAN ENTRY · DARI HARGA SEKARANG</span><b>{decision.verdict}</b></div>
+            <div className="decisionGrid">
+              <span>RISK <b>{num(decision.risk_pct)}%</b></span>
+              <span>RR TP1 NET <b>{num(decision.rr1_net)}</b></span>
+              <span>RR TP2 NET <b>{num(decision.rr2_net)}</b></span>
+              <span>FEE RT <b>{num(decision.fee_r)}R</b></span>
+            </div>
+            <p>{decision.reason}</p>
+            <p className="decisionNote">Informasi keputusan, bukan filter tervalidasi.</p>
           </div>}
           <div className="planRow">
             <span>ENTRY ZONE</span>
