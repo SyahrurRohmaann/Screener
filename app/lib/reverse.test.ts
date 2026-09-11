@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { compareReverse, mirrorPlan, replayPaper, reverseRecord, reverseSide } from "./reverse";
 import type { SignalRecord } from "./store";
 import type { Market } from "./indicators";
+import { compareOriginal } from "./reverse";
 
 const record: SignalRecord = { key: "BTC-1799999", coin: "BTC", sig: "LONG", score: 4,
   mode: "TREND", signal_closed_at: 1799999, recorded_at: 1800000, close: 100,
@@ -104,4 +105,80 @@ test("paired reverse stats use one feed and never negate original net returns", 
     assert.equal(result.reverse.stats.profit_factor, null);
     assert.equal(result.reverse.outcomes.find(o => o.outcome === "TP2")?.count, 1);
   } finally { globalThis.fetch = previous; }
+});
+
+test("original replay restores the stored reverse and negates zero-fee same-exit returns", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify([
+    [0, "100", "101", "99", "100", "1", 1799999],
+    [1800000, "100", "105", "95", "104", "1", 3599999],
+  ])));
+  const fee = process.env.SCREENER_FEE_PCT;
+  const bars = process.env.SCREENER_EVAL_BARS;
+  process.env.SCREENER_FEE_PCT = "0";
+  process.env.SCREENER_EVAL_BARS = "1";
+  try {
+    const stored = reverseRecord(record);
+    const result = await compareOriginal([stored], "all", 3599999);
+    assert.deepEqual(reverseRecord(stored), record);
+    assert.deepEqual(result.rows, [{ original: replayPaper(record, market(105, 95, 104), 0, 1) }]);
+    assert.equal(result.original.stats.net_r, 0.4);
+    const active = await compareReverse([stored], "all", 3599999);
+    assert.equal(result.original.stats.net_r, -active.original.stats.net_r);
+    assert.deepEqual(result.original, active.reverse);
+    assert.equal("reverse" in result, false);
+    assert.equal("rev" in result.rows[0].original, false);
+    assert.equal(stored.sig, "SHORT");
+    assert.equal(stored.stop, 110);
+    assert.equal(result.evidence, "RETROSPECTIVE_REPLAY");
+    assert.equal(result.max_bars, 1);
+
+    process.env.SCREENER_FEE_PCT = "0.1";
+    const withFee = await compareOriginal([stored], "all");
+    assert.equal(withFee.original.stats.net_r, 0.39);
+    assert.equal(replayPaper(stored, market(105, 95, 104), 0.1, 1).net_r, -0.41000000000000003);
+  } finally {
+    if (fee === undefined) delete process.env.SCREENER_FEE_PCT; else process.env.SCREENER_FEE_PCT = fee;
+    if (bars === undefined) delete process.env.SCREENER_EVAL_BARS; else process.env.SCREENER_EVAL_BARS = bars;
+  }
+});
+
+test("original replay evaluates actual candle exits rather than negating stored outcomes", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify([
+    [0, "100", "101", "99", "100", "1", 1799999],
+    [1800000, "100", "125", "95", "120", "1", 3599999],
+  ])));
+  const result = await compareOriginal([reverseRecord(record)], "all");
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(result.rows[0].original.outcome, "TP2");
+  const feeR = result.fee_pct / 10;
+  assert.equal(result.original.stats.net_r, 2 - feeR);
+  assert.equal(result.original.outcomes.find(o => o.outcome === "TP2")?.count, 1);
+  // The active SHORT stops at -1R, while ORI exits at +2R: not opposite returns.
+  assert.equal(replayPaper(reverseRecord(record), market(125, 95, 120), result.fee_pct, result.max_bars).net_r, -1 - feeR);
+});
+
+test("original replay windows are inclusive, sort records, and summarize beyond the row cap", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response("[]"));
+  const day = 86_400_000;
+  const now = 200 * day;
+  const records = [91, 90, 60, 30, 0].map(age => reverseRecord({ ...record,
+    key: `age-${age}`, signal_closed_at: now - age * day }));
+  for (const [range, count] of [["30", 2], ["60", 3], ["90", 4], ["all", 5]] as const) {
+    const result = await compareOriginal(records, range, now);
+    assert.equal(result.total, count);
+    assert.equal(result.range, range);
+    assert.equal(result.ts, now);
+    assert.equal(result.rows[0].original.key, "age-0");
+    assert.equal(result.original.outcomes.find(o => o.outcome === "UNKNOWN")?.count, count);
+  }
+  assert.equal(fetch.mock.callCount(), 4);
+  const many = Array.from({ length: 125 }, (_, i) => ({ ...records[4], key: `row-${i}` }));
+  const capped = await compareOriginal(many, "all", now);
+  assert.equal(capped.rows.length, 120);
+  assert.equal(capped.original.stats.total, 125);
+  assert.equal(capped.total, 125);
+  const empty = await compareOriginal([records[0]], "30", now);
+  assert.equal(empty.total, 0);
+  assert.deepEqual(empty.rows, []);
+  assert.equal(fetch.mock.callCount(), 5);
 });

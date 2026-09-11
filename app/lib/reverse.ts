@@ -84,3 +84,10 @@ export async function compareReverse(records: SignalRecord[], range: HistoryRang
   return { ts: now, range, evidence: "RETROSPECTIVE_REPLAY" as const, fee_pct, max_bars,
     total: rows.length, original: aggregate("original"), reverse: aggregate("reverse"), rows: rows.slice(0, 120) };
 }
+
+export async function compareOriginal(records: SignalRecord[], range: HistoryRange, now = Date.now()) {
+  // The stored ledger is reversed. Restore ORI and reuse the same candle replay,
+  // including its conservative paired-coverage checks, without changing that engine.
+  const { reverse: _reverse, rows, ...result } = await compareReverse(records.map(reverseRecord), range, now);
+  return { ...result, rows: rows.map(({ original }) => ({ original })) };
+}
