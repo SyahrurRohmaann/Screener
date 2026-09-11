@@ -110,5 +110,8 @@ html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
 /* --- Kontrol ukuran huruf --- */
 .status .refreshBtn{min-width:calc(10ch + 26px);flex-shrink:0;white-space:nowrap;text-align:center}
 .scaleCtl button{white-space:nowrap;text-align:center}
+.pageCtl{margin-top:14px}
+.softLoading{opacity:.55;pointer-events:none;transition:opacity .18s ease}
+#historyTable{scroll-margin-top:86px}
 @media(max-width:600px){.status .tick{display:none}}
 .scaleCtl{display:inline-flex;align-items:center;gap:5px;font:var(--fs-2xs) 'DM Mono';color:var(--muted);letter-spacing:.8px}.scaleCtl>span{opacity:.8}.scaleCtl button{padding:5px 7px;font:var(--fs-2xs) 'DM Mono';min-width:26px}.scaleCtl b{color:#cbd2dc;min-width:32px;text-align:center;font-weight:500}.scaleCtl button:disabled{opacity:.35;cursor:not-allowed}@media(max-width:700px){.scaleCtl{font-size:var(--fs-2xs)}.scaleCtl button{min-height:44px;min-width:40px;padding:0 10px;font-size:var(--fs-xs)}.scaleCtl>span{display:none}}

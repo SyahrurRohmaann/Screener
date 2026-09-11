@@ -70,6 +70,7 @@ export default function History() {
   const [error, setError] = useState(false);
   const requestId = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const prevHard = useRef("");
 
   useEffect(() => {
     try { setPageSize(paginate(0, 1, localStorage.getItem(HISTORY_PAGE_SIZE_KEY)).pageSize); }
@@ -85,13 +86,16 @@ export default function History() {
   }
 
   useEffect(() => {
+    const hardKey = `${open}:${range}:${revision}`;
+    const hardChanged = prevHard.current !== hardKey;
+    prevHard.current = hardKey;
     if (!open) return;
     const id = ++requestId.current;
     const abort = new AbortController();
     controller.current = abort;
     setLoading(true);
     setError(false);
-    setData(null);
+    if (hardChanged) setData(null);
     void (async () => {
       try {
         const response = await fetch(`/api/history?range=${range}&page=${page}&pageSize=${pageSize}`, {
@@ -104,7 +108,10 @@ export default function History() {
             payload.total_pages !== Math.ceil(payload.total / pageSize) || !Array.isArray(payload.rows)) {
           throw new Error("Invalid history response");
         }
-        if (id === requestId.current && !abort.signal.aborted) setData(payload);
+        if (id === requestId.current && !abort.signal.aborted) {
+          setData(payload);
+          if (payload.page > payload.total_pages) setPage(Math.max(1, payload.total_pages));
+        }
       } catch {
         if (id === requestId.current && !abort.signal.aborted) setError(true);
       } finally {
@@ -137,21 +144,6 @@ export default function History() {
           }}>
             {value === "all" ? "SEMUA" : `${value} HARI`}
           </button>)}
-      </div>
-      <div className="rangeBtns" role="group" aria-label="Halaman riwayat sinyal" aria-busy={loading}>
-        <label>BARIS PER HALAMAN <select value={pageSize} onChange={(event) => {
-          const size = paginate(0, 1, event.target.value).pageSize;
-          invalidate(); setPageSize(size); setPage(1);
-          try { localStorage.setItem(HISTORY_PAGE_SIZE_KEY, String(size)); }
-          catch { /* Keep the selection for this session if storage is blocked. */ }
-        }}>{HISTORY_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
-        <button disabled={loading || page <= 1} onClick={() => {
-          invalidate(); setPage(Math.max(1, Math.min(page - 1, data?.total_pages || 1)));
-        }}>SEBELUMNYA</button>
-        <span aria-live="polite">HALAMAN {page}{data ? ` / ${data.total_pages} | ${data.total} SINYAL` : ""}</span>
-        <button disabled={loading || !data || page >= data.total_pages} onClick={() => {
-          invalidate(); setPage(page + 1);
-        }}>BERIKUTNYA</button>
       </div>
       {error && <p className="calcEmpty" role="alert">Gagal memuat riwayat. Gunakan HITUNG ULANG untuk mencoba lagi.</p>}
       {!data && loading && <p className="calcEmpty">Mengevaluasi riwayat…</p>}
@@ -214,7 +206,7 @@ export default function History() {
         <StatRow label="MODE" buckets={data!.by_mode} />
         <StatRow label="COIN" buckets={data!.by_coin} />
 
-        <div className="statBlock">
+        <div id="historyTable" className={`statBlock${loading ? " softLoading" : ""}`}>
           <h3>RIWAYAT SINYAL</h3>
           <table className="statTable">
             <thead><tr><th>WAKTU</th><th>COIN</th><th>SIDE</th><th>SCORE</th><th>ENTRY</th><th>STOP</th><th>HASIL</th><th>NET</th><th>BAR</th></tr></thead>
@@ -232,6 +224,23 @@ export default function History() {
               </tr>
             ))}</tbody>
           </table>
+        </div>
+        <div className="rangeBtns pageCtl" role="group" aria-label="Halaman riwayat sinyal" aria-busy={loading}>
+          <label>BARIS PER HALAMAN <select value={pageSize} disabled={loading} onChange={(event) => {
+            const size = paginate(0, 1, event.target.value).pageSize;
+            setPageSize(size); setPage(1);
+            try { localStorage.setItem(HISTORY_PAGE_SIZE_KEY, String(size)); }
+            catch { /* Keep the selection for this session if storage is blocked. */ }
+          }}>{HISTORY_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+          <button disabled={loading || page <= 1} onClick={() => {
+            setPage(Math.max(1, Math.min(page - 1, data?.total_pages || 1)));
+            document.getElementById("historyTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}>SEBELUMNYA</button>
+          <span aria-live="polite">HALAMAN {data!.page} / {data!.total_pages} | {data!.total} SINYAL</span>
+          <button disabled={loading || !data || page >= data.total_pages} onClick={() => {
+            setPage(page + 1);
+            document.getElementById("historyTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}>BERIKUTNYA</button>
         </div>
       </>}
     </>}
