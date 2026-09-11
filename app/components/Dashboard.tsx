@@ -13,6 +13,7 @@ import ScaleControl from "./ScaleControl";
 import type { Row } from "../lib/format";
 import { age, levelPct, liveEntrySnapshot, liveStatus, money, num, pct, planEntry } from "../lib/format";
 import { entryDecision, verdictClass } from "../lib/decision";
+import { AGGREGATE_LIMIT_PCT, AGGREGATE_WARN_PCT, exposureSummary } from "../lib/exposure";
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 import { isMarketStale } from "../lib/signalFreshness";
 
@@ -158,6 +159,8 @@ export default function Dashboard() {
     return true;
   }), [rows, side, mode, minScore, hideStale, now]);
 
+  const exposure = useMemo(() => exposureSummary(rows), [rows]);
+  const exposureClass = { AMAN: "ok", WASPADA: "warn", "MELEBIHI BATAS": "bad", KOSONG: "muted" }[exposure.verdict];
   const setups = rows.filter((r) => r.sig).length;
   const chartRow = chartCoin ? rows.find((r) => r.coin === chartCoin) ?? null : null;
 
@@ -315,6 +318,21 @@ export default function Dashboard() {
         </div>
       </article>;
     }) : <p className="emptyState">Tidak ada market yang lolos filter ini.</p>}</section>
+
+    {exposure.verdict !== "KOSONG" && <section className={`exposure exp-${exposureClass}`} aria-live="polite">
+      <div className="exposureHead">
+        <span>RISIKO GABUNGAN · BILA SEMUA SL BERSAMAAN</span>
+        <div><b>{exposure.verdict}</b>{exposure.verdict === "MELEBIHI BATAS" && <b className="exposureFlag">PANGKAS POSISI</b>}</div>
+      </div>
+      <div className="exposureGrid">
+        <span>SETUP AKTIF <b>{exposure.n_active}</b></span>
+        <span>TOTAL RISIKO <b>{exposure.sum_risk_pct.toFixed(1)}%</b></span>
+        <span>RATA-RATA <b>{exposure.avg_risk_pct.toFixed(1)}%</b></span>
+        <span>LIMIT <b>{AGGREGATE_LIMIT_PCT}%</b></span>
+      </div>
+      <p>{exposure.reason}</p>
+      <p className="exposureNote">Model full-correlation - semua posisi dianggap satu arah. Batas {AGGREGATE_LIMIT_PCT}% &amp; warning {AGGREGATE_WARN_PCT}% adalah konvensi, bukan hasil kalibrasi.</p>
+    </section>}
 
     <RiskCalculator rows={rows} />
 

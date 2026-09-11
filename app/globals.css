@@ -14,6 +14,17 @@ html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
 /* --- Status entry realtime --- */
 .entryLive{margin:0 0 16px;padding:12px;background:#0c1016;border:1px solid var(--line);border-left:3px solid var(--gold)}
 .decision{border:1px solid var(--line);padding:10px 12px;margin-top:10px}
+.exposure{border:1px solid var(--line);padding:14px 16px;margin-top:26px}
+.exposureHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font:var(--fs-sm) 'DM Mono'}
+.exposureHead span{font:var(--fs-xs) 'DM Mono';color:var(--muted);letter-spacing:.8px}
+.exposureHead>div{display:flex;align-items:center;flex-wrap:wrap;gap:6px 0}
+.exposureGrid{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font:var(--fs-sm) 'DM Mono'}
+.exposureGrid span{color:var(--muted)}.exposureGrid b{color:var(--text);margin-left:4px}
+.exposure p{font:var(--fs-sm) 'DM Mono';color:var(--muted);margin:8px 0 0;line-height:1.6;overflow-wrap:anywhere}
+.exposure .exposureNote{font-size:var(--fs-xs)}
+.exp-ok .exposureHead b{color:var(--green)}.exp-warn .exposureHead b{color:var(--gold)}.exp-bad .exposureHead b{color:var(--red)}
+.exp-bad{border-color:#6b3038}
+.exposureFlag{margin-left:10px;font:var(--fs-xs) 'DM Mono';color:var(--red);border:1px solid #6b3038;padding:2px 6px}
 .decisionHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font:var(--fs-sm) 'DM Mono'}
 .decisionHead span{font:var(--fs-xs) 'DM Mono';color:var(--muted);letter-spacing:.8px}
 .decisionGrid{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font:var(--fs-sm) 'DM Mono'}
