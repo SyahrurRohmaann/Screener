@@ -30,7 +30,7 @@ export default function SignalAlerts({
   rows, onOpenSignal,
 }: {
   rows: Row[];
-  onOpenSignal: (coin: string) => void;
+  onOpenSignal: (coin: string, closedAt?: number | null) => void;
 }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
@@ -48,6 +48,11 @@ export default function SignalAlerts({
   const primed = useRef(false);
   const hydrated = useRef(false);
   const statusStates = useRef<Map<string, AlertState>>(new Map());
+  const onOpenSignalRef = useRef(onOpenSignal);
+
+  useEffect(() => {
+    onOpenSignalRef.current = onOpenSignal;
+  }, [onOpenSignal]);
 
   useEffect(() => {
     let disposed = false;
@@ -136,9 +141,11 @@ export default function SignalAlerts({
     if (enabled && pushActive === false && typeof Notification !== "undefined" && Notification.permission === "granted") {
       for (const r of fresh) {
         try {
-          new Notification(`Sinyal baru: ${r.coin} ${r.sig}`, {
+          const n = new Notification(`Sinyal baru: ${r.coin} ${r.sig}`, {
             body: summarize(r), tag: signalKey(r), silent: false,
+            data: { coin: r.coin, closed_at: r.signal_closed_at },
           });
+          n.onclick = () => { window.focus(); onOpenSignalRef.current(r.coin, r.signal_closed_at ?? null); };
         } catch {}
       }
     }
@@ -159,7 +166,14 @@ export default function SignalAlerts({
     })), ...cur].slice(0, 4));
     if (enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
       for (const event of transition.events) {
-        try { new Notification(`Update ${event.coin}: ${event.kind}`, { body: event.text, tag: `${event.key}-${event.kind}` }); } catch {}
+        try {
+          const closedAt = rows.find((r) => signalKey(r) === event.key)?.signal_closed_at;
+          const n = new Notification(`Update ${event.coin}: ${event.kind}`, {
+            body: event.text, tag: `${event.key}-${event.kind}`,
+            data: { coin: event.coin, closed_at: closedAt },
+          });
+          n.onclick = () => { window.focus(); onOpenSignalRef.current(event.coin, closedAt ?? null); };
+        } catch {}
       }
     }
   }, [rows, enabled, alertPrefs, sound, volume]);
@@ -188,7 +202,7 @@ export default function SignalAlerts({
   const openItem = (item: InboxItem) => {
     setInbox((cur) => markInboxRead(cur, item.key));
     setInboxOpen(false);
-    onOpenSignal(item.coin);
+    onOpenSignal(item.coin, item.signal_closed_at);
   };
 
   /**
@@ -270,7 +284,7 @@ export default function SignalAlerts({
             <span className="inboxMeta"><b>SKOR {item.score}</b><small>{when(item.signal_closed_at)}</small></span>
           </button>
         ))}</div>}
-      <p className="inboxNote">Disimpan lokal di browser ini, bukan sinkron antarperangkat. Klik item untuk buka chart coin terkait.</p>
+      <p className="inboxNote">Disimpan lokal di browser ini, bukan sinkron antarperangkat. Klik item untuk menuju kartunya.</p>
     </aside>}
 
     {toasts.length > 0 && <div className="toasts" role="status" aria-live="polite">

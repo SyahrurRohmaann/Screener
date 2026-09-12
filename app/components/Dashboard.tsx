@@ -17,6 +17,7 @@ import { AGGREGATE_LIMIT_PCT, AGGREGATE_WARN_PCT, exposureSummary } from "../lib
 import type { ContextDiagnostics, MarketDiagnostics, PriceDiagnostics } from "../lib/diagnostics";
 import { isMarketStale } from "../lib/signalFreshness";
 import { parseSignalRef, type SignalRef } from "../lib/deep-link";
+import { resolveSignalFocus, rowPassesFilters } from "../lib/signal-focus";
 
 const COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT"];
 // Taker round trip, mirroring SCREENER_FEE_PCT used by the evaluator.
@@ -152,23 +153,21 @@ export default function Dashboard() {
     return () => clearInterval(clock);
   }, []);
 
-  const shown = useMemo(() => rows.filter((r) => {
-    if (side !== "ALL" && r.sig !== side) return false;
-    if (mode !== "ALL" && r.mode !== mode) return false;
-    if (minScore > 0 && (r.score ?? 0) < minScore) return false;
-    if (hideStale) {
-      const state = liveStatus(r, now);
-      if (state === "EXPIRED" || state === "INVALIDATED") return false;
-    }
-    return true;
-  }), [rows, side, mode, minScore, hideStale, now]);
+  const shown = useMemo(() => rows.filter((r) => rowPassesFilters(
+    r, { side, mode, minScore, hideStale }, (r) => liveStatus(r, now),
+  )), [rows, side, mode, minScore, hideStale, now]);
+
+  const openSignalCard = useCallback((coin: string, closedAt?: number | null) => {
+    setFocusKey({ coin: coin.toUpperCase(), closed_at: closedAt ?? 0 });
+    setFocusSignal(null);
+    setSignalMiss(false);
+  }, []);
 
   useEffect(() => {
     const openSignal = (url: string) => {
       try {
-        setFocusKey(parseSignalRef(new URL(url, window.location.href).searchParams.get("s")));
-        setFocusSignal(null);
-        setSignalMiss(false);
+        const ref = parseSignalRef(new URL(url, window.location.href).searchParams.get("s"));
+        if (ref) openSignalCard(ref.coin, ref.closed_at);
       } catch { /* Ignore malformed notification URLs. */ }
     };
     const onMessage = (event: MessageEvent) => {
@@ -177,22 +176,44 @@ export default function Dashboard() {
     openSignal(window.location.href);
     navigator.serviceWorker?.addEventListener("message", onMessage);
     return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
-  }, []);
+  }, [openSignalCard]);
 
   useEffect(() => {
     if (!focusKey || !updated) return;
-    const row = rows.find((r) => r.coin === focusKey.coin && r.signal_closed_at === focusKey.closed_at);
-    if (row) {
-      const card = document.getElementById(`signal-${row.coin}-${row.signal_closed_at}`);
-      if (!card) return; // Preserve filters; focus once the matching card is visible.
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
-      setFocusSignal(focusKey);
-    } else {
+    const plan = resolveSignalFocus(rows, focusKey, { side, mode, minScore, hideStale }, (r) => liveStatus(r, now));
+    const clearFocus = () => {
+      setFocusKey(null);
+      window.history.replaceState(null, "", window.location.pathname);
+    };
+    if (plan.kind === "missing") {
       setSignalMiss(true);
+      clearFocus();
+      return;
     }
-    setFocusKey(null);
-    window.history.replaceState(null, "", window.location.pathname);
-  }, [focusKey, rows, shown, updated]);
+    if (plan.hidden) {
+      if (side !== "ALL") setSide("ALL");
+      if (mode !== "ALL") setMode("ALL");
+      if (minScore !== 0) setMinScore(0);
+      if (hideStale) setHideStale(false);
+    }
+    const row = plan.row;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (n: number) => {
+      const card = document.getElementById(`signal-${row.coin}-${row.signal_closed_at}`);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        setFocusSignal({ coin: row.coin, closed_at: row.signal_closed_at ?? 0 });
+        clearFocus();
+      } else if (n < 20) {
+        timer = setTimeout(() => attempt(n + 1), 150);
+      } else {
+        setSignalMiss(true);
+        clearFocus();
+      }
+    };
+    attempt(0);
+    return () => clearTimeout(timer);
+  }, [focusKey, rows, shown, updated, side, mode, minScore, hideStale, now]);
 
   useEffect(() => {
     if (!focusSignal) return;
@@ -225,7 +246,7 @@ export default function Dashboard() {
 
     <AccountPanel scaleControl={<ScaleControl />} />
     <DataHealth market={marketHealth} context={contextHealth} price={priceHealth} engine={engine} />
-    <SignalAlerts rows={rows} onOpenSignal={setChartCoin} />
+    <SignalAlerts rows={rows} onOpenSignal={openSignalCard} />
 
     <section className="hero">
       <div>
