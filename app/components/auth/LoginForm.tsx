@@ -11,11 +11,12 @@ export default function LoginForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    const website = new FormData(event.currentTarget as HTMLFormElement).get("website");
     setState("sending"); setMessage("");
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, website }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
@@ -32,6 +33,7 @@ export default function LoginForm() {
     <p className="eyebrow">AKSES TERBATAS</p>
     <h1>SCREENER</h1>
     <p className="lead">Masuk untuk melihat sinyal teknikal dan forward lab.</p>
+    <input className="hp" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
     <label htmlFor="password">Password</label>
     <input id="password" name="password" type="password" autoComplete="current-password"
       value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />

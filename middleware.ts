@@ -4,7 +4,7 @@ const COOKIE = "screener_session";
 // The manifest and icons must be readable without a session or Chrome will not offer to
 // install the app; they contain no market data. Fonts likewise, so the login page keeps
 // its typography.
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/manifest.webmanifest", "/sw.js"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/manifest.webmanifest", "/sw.js", "/favicon.ico", "/robots.txt"];
 const PUBLIC_PREFIXES = ["/icons/", "/fonts/"];
 // Logout must not have its cookie slid forward, or the sign-out would be undone.
 const NO_REFRESH_PATHS = ["/api/auth/logout"];

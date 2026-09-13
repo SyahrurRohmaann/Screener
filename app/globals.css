@@ -1,4 +1,10 @@
 @import './fonts.css';
+.notFound{max-width:900px;min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:60px 24px}
+.notFound h1{font:500 clamp(1.75rem,5vw,3.5rem)/1.15 'DM Mono',monospace;text-transform:uppercase;letter-spacing:-.04em;margin:20px 0;overflow-wrap:anywhere}
+.notFound>p:not(.eyebrow){color:var(--muted);line-height:1.8;max-width:600px}
+.notFound ul{list-style:none;padding:0;margin:24px 0 0;display:flex;flex-wrap:wrap;gap:10px}
+.notFound a{display:inline-block;padding:14px 18px;border:1px solid var(--line);background:var(--panel);color:var(--green);font:var(--fs-lg) 'DM Mono',monospace;text-decoration:none}
+.notFound a:hover,.notFound a:focus-visible{border-color:var(--green);color:var(--text)}
 .card{scroll-margin-top:96px}
 :root{--ui-scale:1;--fs-3xs:0.4375rem;--fs-2xs:0.5rem;--fs-xs:0.5625rem;--fs-sm:0.625rem;--fs-md:0.6875rem;--fs-lg:0.75rem;--fs-xl:0.8125rem;--fs-2xl:0.9375rem;}
 html{font-size:calc(100% * var(--ui-scale));-webkit-text-size-adjust:100%}
